@@ -1,4 +1,3 @@
-
 ---
 name: architecture-design
 description: Metodología para analizar requerimientos y producir arquitecturas de software, diagramas C4, modelos de datos, contratos API, ADR y planes de implementación.
