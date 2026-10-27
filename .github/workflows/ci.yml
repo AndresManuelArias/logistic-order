@@ -1,0 +1,36 @@
+# CI mínima de F1: lint + pruebas + build del backend y validación del Compose.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (lint, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: go vet
+        run: GOTOOLCHAIN=local go vet ./...
+      - name: go test (con race detector)
+        run: GOTOOLCHAIN=local go test -race ./...
+      - name: build
+        run: GOTOOLCHAIN=local go build ./...
+
+  compose:
+    name: Valida docker-compose.yml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config -q

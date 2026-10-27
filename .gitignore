@@ -1,0 +1,26 @@
+# Entornos locales y secretos
+.env
+.env.local
+
+# Go
+backend/server
+backend/coverage.out
+*.test
+
+# Node (web/móvil, F4+)
+node_modules/
+.next/
+dist/
+.expo/
+build/
+
+# IaC (F6)
+.terraform/
+*.tfstate*
+.terraform.lock.hcl
+
+# Sistema y editores
+.DS_Store
+*.log
+.idea/
+.vscode/
