@@ -112,6 +112,16 @@
 
 ---
 
+### ADR-09 — Geodatos: PostGIS para todas las coordenadas
+
+- PostgreSQL se extiende con **PostGIS**; toda columna geográfica usa `geometry(Point, 4326)` (WGS84, estándar GPS).
+- **`orders.destination`** almacena el punto exacto donde debe llegar la orden (y `orders.origin` el de salida), con **índices GiST**.
+- Consultas espaciales con `ST_DWithin(::geography)`, `ST_Distance_Sphere`, `ST_Contains` (geocercas), en lugar de cálculos sobre columnas `lat`/`lon` sueltas.
+- TimescaleDB y PostGIS conviven en la misma hypertable (`telemetry.points.location`).
+- Revisar si: aparece un caso de uso que exija geometrías complejas (polígonos de ruta) no cubierto por los tipos ya elegidos.
+
+---
+
 ## 4. Estructura del Repositorio
 
 ### 4.1 Backend (monolito Go) — fuente: `doc/arquitectura/monolito_modular/estructura_carpetas_backend.md`
@@ -167,15 +177,19 @@ mobile/src/
 
 ## 5. Modelo de Datos (esquemas)
 
-**Esquema `app` (PostgreSQL):**
+> **Documento completo del modelo de datos:** [`doc/arquitectura/database/modelo_datos.md`](arquitectura/database/modelo_datos.md) (diagrama PlantUML: `modelo_datos.puml` / `modelo_datos.png`).
+
+**Extensiones habilitadas:** `postgis` (todas las coordenadas como `geometry(Point, 4326)`) y `timescaledb` (hypertable). **PostGIS es obligatorio para todo lo geográfico** (ADR-09).
+
+**Esquema `app` (PostgreSQL + PostGIS):**
 
 | Tabla | Columnas clave | Notas |
 |---|---|---|
 | `users` | id, email, password_hash, role (`PROVIDER`\|`STORE`\|`DRIVER`), status, created_at | RF-01 |
-| `stores` | id, name, owner_user_id, address, geo | tienda de barrio |
-| `vehicles` | id, plate, provider_id, status | flota B2B |
+| `stores` | id, name, owner_user_id, address, **location geometry(Point,4326)** | tienda de barrio (PostGIS) |
+| `vehicles` | id, plate, provider_id, status, **last_known_location geometry(Point,4326)** | flota B2B (PostGIS) |
 | `drivers` | id, user_id, vehicle_id | conductor vinculado |
-| `orders` | id, external_ref, store_id, customer_id?, status (`CREATED`\|`IN_TRANSIT`\|`DELIVERED`\|`CANCELLED`), assigned_vehicle_id, assigned_driver_id, created_at, delivered_at | RF-05, RF-06 |
+| `orders` | id, external_ref, store_id, customer_id?, status (`CREATED`\|`IN_TRANSIT`\|`DELIVERED`\|`CANCELLED`), assigned_vehicle_id, assigned_driver_id, **origin geometry(Point,4326)**, **destination geometry(Point,4326)**, destination_address, distance_meters, placed_at, picked_up_at, delivered_at, created_at | RF-05, RF-06 · **PostGIS: `destination` es el punto de llega de la orden** |
 | `order_events` | id, order_id, status, actor_user_id, occurred_at, payload jsonb | auditoría de transiciones |
 | `guest_tokens` | id, order_id, token_hash, expires_at, revoked | RF-02 cliente final |
 | `sync_receipts` | id, idempotency_key UNIQUE, device_id, processed_at | RF-09 idempotencia del bulk sync |
@@ -184,7 +198,7 @@ mobile/src/
 
 | Objeto | Definición |
 |---|---|
-| `telemetry.points` (hypertable) | time TIMESTAMPTZ, vehicle_id, order_id?, lat, lon, speed, accuracy, source (`DEVICE`\|`BULK_SYNC`), device_seq BIGINT — PK compuesta `(time, vehicle_id, device_seq)` |
+| `telemetry.points` (hypertable) | time TIMESTAMPTZ, vehicle_id, order_id?, **location geometry(Point,4326)**, speed, accuracy, source (`DEVICE`\|`BULK_SYNC`), device_seq BIGINT — PK compuesta `(time, vehicle_id, device_seq)` |
 | `telemetry.stops` (vista/agregado) | paradas: vehículo detenido > N minutos en un radio — alimenta al agente IA |
 | Retención | política `drop_chunks` configurable (ej. 90 días) |
 
@@ -206,7 +220,7 @@ mobile/src/
 - `POST /api/v1/auth/logout`
 
 **Órdenes**
-- `POST /api/v1/orders` (idempotency) · `GET /api/v1/orders` (filtros: status, store, vehicle, rango de fechas) · `GET /api/v1/orders/{id}`
+- `POST /api/v1/orders` (idempotency; payload con `origin {lat,lon}` y **`destination {lat,lon}`** o dirección geocodificada) · `GET /api/v1/orders` (filtros: status, store, vehicle, rango de fechas, **radio en metros alrededor de un punto**) · `GET /api/v1/orders/{id}`
 - `PATCH /api/v1/orders/{id}/status` (transiciones validadas)
 - `POST /api/v1/orders/{id}/assignment` (vehículo + conductor)
 
@@ -238,7 +252,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - **Tareas:**
   1. Estructura del monolito Go (§4.1) + `go.mod` + logger + config por env.
   2. `docker-compose.yml`: `backend`, `timescaledb`, `web` (placeholder), migraciones al arrancar.
-  3. Migraciones iniciales: esquemas `app` y `telemetry`, hypertable + retención.
+  3. Migraciones iniciales: extensiones `postgis` + `timescaledb`, esquemas `app` y `telemetry`, índices GiST, hypertable + retención.
   4. Healthcheck `GET /healthz`.
 - **Entregables:** repo compila, `make dev` levanta el stack, migraciones aplicadas.
 - **Criterio de aceptación:** `docker compose up` sin errores y `curl /healthz` → 200.
@@ -253,7 +267,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   2. Middleware RBAC + `RequireRole` + filtrado de datos por rol en repositorios.
   3. Módulo `orders`: CRUD, máquina de estados, `order_events`, asignación de flota (RF-06).
   4. Token de invitado para Cliente Final, con expiración y scope `order:<id>`.
-  5. Seed de datos demo (1 proveedor, 2 tiendas, 3 conductores, 10 órdenes).
+  5. Seed de datos demo (1 proveedor, 2 tiendas con `location`, 3 conductores, 10 órdenes **con `origin` y `destination` georreferenciadas**).
   6. Contrato `doc/api/openapi.yaml` con lo implementado.
 - **Criterio de aceptación:** un usuario de un rol **nunca** puede leer recursos de otro rol (probado); transiciones inválidas → 409.
 - **Pruebas:** unitarias de dominio y casos de uso; integración API del happy path y de denegación por rol.
@@ -374,6 +388,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | R6 | WebSockets detrás de reverse proxy/load balancer | Riesgo | Exigir soporte de upgrade (sticky/WS-aware) al desplegar |
 | R7 | La arquitectura de microservicios documentada no se implementa en esta fase | **ADR-01** | Documentar en el README el camino de extracción futura |
 | R8 | No hay definición de notificaciones (email/SMS) a tenderos/clientes | Fuera de alcance | Confirmar si se incluye o se excluye explícitamente |
+| R9 | Origen de la geocodificación de `orders.destination` sin definir | **Pendiente** | ¿El cliente envía lat/lon o dirección? Definir quién geocodifica (cliente, backend o proveedor externo) — ver `doc/arquitectura/database/modelo_datos.md` §6 |
 
 ---
 
@@ -384,5 +399,6 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - [ ] Ningún componente sin responsabilidad definida (§4, §6).
 - [ ] El aislamiento de datos por rol está implementado y probado server-side.
 - [ ] El camino offline→online del móvil no duplica datos (idempotencia extremo a extremo).
-- [ ] Las decisiones ADR-01…ADR-08 están reflejadas en el código o documentadas como pendientes.
+- [ ] Las decisiones ADR-01…ADR-09 están reflejadas en el código o documentadas como pendientes.
+- [ ] Todas las columnas geográficas usan `geometry(Point,4326)` con índice GiST (PostGIS) y `orders.destination` está poblada en las órdenes de seed.
 - [ ] El README incluye decisiones de arquitectura y auditoría del uso de la IA.

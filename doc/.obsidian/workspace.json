@@ -14,7 +14,7 @@
               "type": "markdown",
               "state": {
                 "file": "plan_desarrollo.md",
-                "mode": "source",
+                "mode": "preview",
                 "source": false
               },
               "icon": "lucide-file",
@@ -189,5 +189,12 @@
     }
   },
   "active": "d0563656396d887e",
-  "lastOpenFiles": []
+  "lastOpenFiles": [
+    "arquitectura/database/modelo_datos.md",
+    "arquitectura/database/sedouigAM",
+    "arquitectura/database/modelo_datos.png",
+    "arquitectura/database/sedUGJ10q",
+    "arquitectura/database/modelo_datos.puml",
+    "arquitectura/database"
+  ]
 }

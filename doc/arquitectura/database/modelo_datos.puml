@@ -1,0 +1,194 @@
+@startuml
+!pragma layout smetana
+skinparam linetype ortho
+skinparam backgroundColor #F9FBFD
+skinparam DefaultFontName Arial
+skinparam entity {
+    BackgroundColor #F7FBFF
+    BorderColor #2C5282
+    ArrowColor #2C5282
+    AttributeFontSize 11
+}
+
+title Modelo de Datos Relacional - Tiendas-Track (PostgreSQL + PostGIS + TimescaleDB)
+
+' ============ ESQUEMA app ============
+
+package "Esquema `app` (PostgreSQL + PostGIS)" #E8F0FE {
+
+    entity "users" as users {
+        * id : UUID <<PK>>
+        --
+        * email : VARCHAR(255) <<UNIQUE>>
+        * password_hash : TEXT
+        * full_name : VARCHAR(120)
+        * role : role_enum <<PROVIDER | STORE | DRIVER>>
+        * status : status_enum <<ACTIVE | SUSPENDED>>
+        * created_at : TIMESTAMPTZ
+        * updated_at : TIMESTAMPTZ
+    }
+
+    entity "stores" as stores {
+        * id : UUID <<PK>>
+        --
+        * name : VARCHAR(120)
+        * owner_user_id : UUID <<FK>>
+        * address : TEXT
+        * location : geometry(Point,4326) <<POSTGIS>>
+        * created_at : TIMESTAMPTZ
+    }
+
+    entity "vehicles" as vehicles {
+        * id : UUID <<PK>>
+        --
+        * plate : VARCHAR(10) <<UNIQUE>>
+        * provider_id : UUID <<FK>>
+        * status : status_enum <<ACTIVE | INACTIVE>>
+        * last_known_location : geometry(Point,4326) <<POSTGIS>>
+        * last_reported_at : TIMESTAMPTZ
+        * created_at : TIMESTAMPTZ
+    }
+
+    entity "drivers" as drivers {
+        * id : UUID <<PK>>
+        --
+        * user_id : UUID <<FK>>
+        * vehicle_id : UUID <<FK>>
+        * license_number : VARCHAR(30)
+        * created_at : TIMESTAMPTZ
+    }
+
+    entity "orders" as orders {
+        * id : UUID <<PK>>
+        --
+        * external_ref : VARCHAR(64) <<UNIQUE>>
+        * store_id : UUID <<FK>>
+        * customer_id : UUID <<FK?>>
+        * status : order_status <<CREATED | IN_TRANSIT | DELIVERED | CANCELLED>>
+        * assigned_vehicle_id : UUID <<FK?>>
+        * assigned_driver_id : UUID <<FK?>>
+        * origin : geometry(Point,4326) <<POSTGIS>>
+        * destination : geometry(Point,4326) <<POSTGIS>>
+        * destination_address : TEXT
+        * distance_meters : DOUBLE PRECISION
+        * placed_at : TIMESTAMPTZ
+        * picked_up_at : TIMESTAMPTZ
+        * delivered_at : TIMESTAMPTZ
+        * created_at : TIMESTAMPTZ
+        * updated_at : TIMESTAMPTZ
+    }
+
+    entity "order_events" as order_events {
+        * id : UUID <<PK>>
+        --
+        * order_id : UUID <<FK>>
+        * status : order_status
+        * actor_user_id : UUID <<FK?>>
+        * occurred_at : TIMESTAMPTZ
+        * location : geometry(Point,4326) <<POSTGIS?>>
+        * payload : JSONB
+    }
+
+    entity "guest_tokens" as guest_tokens {
+        * id : UUID <<PK>>
+        --
+        * order_id : UUID <<FK>>
+        * token_hash : TEXT <<UNIQUE>>
+        * expires_at : TIMESTAMPTZ
+        * revoked : BOOLEAN
+        * created_at : TIMESTAMPTZ
+    }
+
+    entity "sync_receipts" as sync_receipts {
+        * id : UUID <<PK>>
+        --
+        * idempotency_key : TEXT <<UNIQUE>>
+        * device_id : VARCHAR(64)
+        * driver_id : UUID <<FK>>
+        * points_count : INTEGER
+        * processed_at : TIMESTAMPTZ
+    }
+
+    entity "ai_query_log" as ai_query_log {
+        * id : UUID <<PK>>
+        --
+        * user_id : UUID <<FK>>
+        * question : TEXT
+        * tool : VARCHAR(64)
+        * params : JSONB
+        * latency_ms : INTEGER
+        * occurred_at : TIMESTAMPTZ
+    }
+}
+
+' ============ ESQUEMA telemetry ============
+
+package "Esquema `telemetry` (TimescaleDB + PostGIS)" #FFE8E8 {
+
+    entity "telemetry.points\n(HYPERTABLE particionada por `time`)" as points {
+        * time : TIMESTAMPTZ <<PK PART 1>>
+        * vehicle_id : UUID <<PK PART 2>>
+        * device_seq : BIGINT <<PK PART 3>>
+        --
+        order_id : UUID <<FK?>>
+        location : geometry(Point,4326) <<POSTGIS>>
+        speed_kph : DOUBLE PRECISION
+        accuracy_m : DOUBLE PRECISION
+        heading : DOUBLE PRECISION
+        source : source_enum <<DEVICE | BULK_SYNC>>
+        received_at : TIMESTAMPTZ
+    }
+
+    entity "telemetry.stops\n(VISTA materializada)" as stops {
+        vehicle_id : UUID
+        --
+        order_id : UUID <<FK?>>
+        stop_start : TIMESTAMPTZ
+        stop_end : TIMESTAMPTZ
+        duration_seconds : INTEGER
+        location : geometry(Point,4326) <<POSTGIS>>
+    }
+}
+
+' ============ RELACIONES ============
+
+users ||--o{ stores : "posee (rol STORE)"
+users ||--o{ drivers : "es conductor (rol DRIVER)"
+users ||--o{ ai_query_log : "consulta IA"
+
+stores ||--o{ orders : "genera"
+users ||--o{ vehicles : "proveedor dueño (rol PROVIDER)"
+vehicles ||--o{ drivers : "tiene"
+vehicles ||--o{ orders : "asignado a"
+drivers ||--o{ orders : "asignado a"
+orders ||--o{ order_events : "historial (append-only)"
+orders ||--o{ guest_tokens : "token de rastreo"
+orders ||--o{ points : "traza de la orden (nullable)"
+
+vehicles ||--o{ points : "emite telemetría"
+stops }o--|| points : "agrega paradas"
+
+' ============ INDICES ESPACIALES (nota) ============
+
+note bottom of orders
+  **Índices GiST:**
+  • idx_orders_destination ON orders USING GIST (destination)
+  • idx_orders_origin ON orders USING GIST (origin)
+  • idx_points_location ON points USING GIST (location)
+  • idx_stores_location ON stores USING GIST (location)
+
+  **Consultas espaciales típicas:**
+  • ST_DWithin(destination, ST_MakePoint(lon,lat), radio_m)
+  • ST_Distance_Sphere(origin, destination)
+  • Órdenes dentro de una zona (ST_Contains(poligono, destination))
+end note
+
+note right of points
+  **Retención:** política drop_chunks
+  (ej. 90 días) sobre la hypertable.
+
+  **Idempotencia:** ON CONFLICT
+  (time, vehicle_id, device_seq) DO NOTHING.
+end note
+
+@enduml
