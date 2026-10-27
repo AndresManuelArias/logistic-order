@@ -199,7 +199,7 @@ mobile/src/
 | Objeto | Definición |
 |---|---|
 | `telemetry.points` (hypertable) | time TIMESTAMPTZ, vehicle_id, order_id?, **location geometry(Point,4326)**, speed, accuracy, source (`DEVICE`\|`BULK_SYNC`), device_seq BIGINT — PK compuesta `(time, vehicle_id, device_seq)` |
-| `telemetry.stops` (vista/agregado) | paradas: vehículo detenido > N minutos en un radio — alimenta al agente IA |
+| `telemetry.stops` (**continuous aggregate** de TimescaleDB, refresco 1 min) | paradas: vehículo detenido ≥ N minutos dentro de un radio (ej. 30 m), derivadas de `telemetry.points` — alimenta al agente IA (RF-10) y KPIs |
 | Retención | política `drop_chunks` configurable (ej. 90 días) |
 
 **Reglas de integridad:**
@@ -252,7 +252,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - **Tareas:**
   1. Estructura del monolito Go (§4.1) + `go.mod` + logger + config por env.
   2. `docker-compose.yml`: `backend`, `timescaledb`, `web` (placeholder), migraciones al arrancar.
-  3. Migraciones iniciales: extensiones `postgis` + `timescaledb`, esquemas `app` y `telemetry`, índices GiST, hypertable + retención.
+  3. Migraciones iniciales: extensiones `postgis` + `timescaledb`, esquemas `app` y `telemetry`, índices GiST, hypertable + retención, continuous aggregate `telemetry.stops` + política de refresco.
   4. Healthcheck `GET /healthz`.
 - **Entregables:** repo compila, `make dev` levanta el stack, migraciones aplicadas.
 - **Criterio de aceptación:** `docker compose up` sin errores y `curl /healthz` → 200.

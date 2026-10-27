@@ -139,14 +139,17 @@ package "Esquema `telemetry` (TimescaleDB + PostGIS)" #FFE8E8 {
         received_at : TIMESTAMPTZ
     }
 
-    entity "telemetry.stops\n(VISTA materializada)" as stops {
-        vehicle_id : UUID
+    entity "telemetry.stops\n(CONTINUOUS AGGREGATE · refresco 1 min)" as stops {
+        bucket_start : TIMESTAMPTZ <<PK>>
+        * vehicle_id : UUID <<PK>>
+        * stop_index : INTEGER <<PK>>
         --
         order_id : UUID <<FK?>>
         stop_start : TIMESTAMPTZ
         stop_end : TIMESTAMPTZ
         duration_seconds : INTEGER
         location : geometry(Point,4326) <<POSTGIS>>
+        is_moving : BOOLEAN
     }
 }
 
@@ -189,6 +192,14 @@ note right of points
 
   **Idempotencia:** ON CONFLICT
   (time, vehicle_id, device_seq) DO NOTHING.
+
+  **Detección de paradas (deriva de ESTOS puntos):**
+  misma ubicación dentro de un radio (ej. 30 m, ruido GPS)
+  durante >= N minutos. Regla: un hueco de señal >
+  X minutos CORTA la parada (no se cuenta como detenido).
+
+  `telemetry.stops` = continuous aggregate con política de
+  refresco automático (ej. 1 min) — no se inserta a mano.
 end note
 
 @enduml

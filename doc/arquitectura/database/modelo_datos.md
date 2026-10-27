@@ -34,7 +34,7 @@ Todas las coordenadas se almacenan como **`geometry(Point, 4326)`** (SRID 4326 =
 | `stores` | `location` | Ubicación de la tienda de barrio (geocercas, "flota que me surte"). |
 | `vehicles` | `last_known_location` | Última posición conocida (cache de lectura rápida). |
 | `telemetry.points` | `location` | Cada punto GPS de la traza. |
-| `telemetry.stops` | `location` | Centro de cada parada detectada. |
+| `telemetry.stops` | `location` | Centro de cada parada detectada (continuous aggregate derivado de `points`). |
 | `order_events` | `location` (nullable) | Ubicación en el momento del evento (ej. entrega). |
 
 **Ventajas de PostGIS frente a lat/lon simples:**
@@ -124,10 +124,51 @@ SELECT id FROM orders WHERE ST_Contains(:zona::geography::geometry, destination)
 | Objeto | Definición |
 |---|---|
 | `telemetry.points` | **Hypertable** particionada por `time`. PK compuesta `(time, vehicle_id, device_seq)` para tolerar duplicados. Columna `location geometry(Point,4326)` con índice GiST. FK lógica a `vehicles` y `orders` (sin restricción física por desempeño en ingestas masivas). |
-| `telemetry.stops` | Vista/agregado de paradas (vehículo detenido > N minutos) que alimenta al agente IA (`get_stopped_vehicles`). |
+| `telemetry.stops` | **Continuous Aggregate de TimescaleDB** (política de refresco automático, ej. cada 1 min) con los intervalos en que un vehículo estuvo detenido > N minutos dentro de un radio. Alimenta al agente IA (`get_stopped_vehicles`) y los KPIs de permanencia. |
 | Retención | Política `drop_chunks` configurable (ej. 90 días). |
 
 **Idempotencia:** `INSERT ... ON CONFLICT (time, vehicle_id, device_seq) DO NOTHING` para que el Bulk Sync pueda reintentarse sin duplicar (RF-09 / RNF-06).
+
+---
+
+### 3.1 ¿Por qué existe `telemetry.stops` si las paradas se deducen de los puntos?
+
+El sistema **sí detecta las paradas comparando coordenadas en el tiempo** (RF-03): la columna `stops` no es una fuente nueva, es el **resultado materializado de ese cálculo**. La decisión es *cuándo* calcularlo:
+
+| Enfoque | Coste |
+|---|---|
+| Consultar on-the-fly (`LAG()` + `ST_DWithin` sobre `telemetry.points` en cada petición) | Escanea ~1,7 M de filas/día por cada pregunta (100 vehículos × 1 punto/5 s). SQL complejo repetido en cada endpoint y en cada herramienta del agente IA. |
+| **Continuous Aggregate (elegido)** | El mismo cálculo corre como política `refresh_continuous_aggregate` (cada 1 min) y las consultas leen intervalos ya resumidos. Rápido, sin SQL duplicado. |
+| Vista materializada manual | Se obsoleta entre refrescos; requiere cron externo. |
+
+**Criterio de detección (deriva de `telemetry.points`):**
+1. **Radio:** los puntos deben caer dentro de un radio (ej. 30 m) — el GPS tiene ruido de 5–15 m, por eso no se compara igualdad exacta de coordenadas.
+2. **Duración:** el intervalo debe ser ≥ N minutos (ej. 20 min para RF-10).
+3. **Huecos de señal:** un vacío de puntos mayor a X minutos (dispositivo apagado / sin cobertura) **corta** la parada; no se cuenta como tiempo detenido.
+
+**Definición (esquema `telemetry`):**
+
+```sql
+-- Continuous aggregate: bucket de 1 min con posición y estado de movimiento
+CREATE MATERIALIZED VIEW telemetry.stops
+WITH (timescaledb.continuous) AS
+SELECT
+    time_bucket('1 minute', time) AS bucket_start,
+    vehicle_id,
+    location,
+    order_id,
+    ST_DWithin(location, LAG(location) OVER (PARTITION BY vehicle_id ORDER BY time), 30) AS is_moving
+FROM telemetry.points
+GROUP BY bucket_start, vehicle_id, location, order_id;
+
+-- Política de refresco automático
+SELECT add_continuous_aggregate_policy('telemetry.stops',
+    start_offset => INTERVAL '3 hours',
+    end_offset   => INTERVAL '1 minute',
+    schedule_interval => INTERVAL '1 minute');
+```
+
+> Los intervalos de parada (inicio, fin, duración, índice de parada) se derivan de agrupar los buckets consecutivos con `is_moving = false`; el agente IA los lee con `get_stopped_vehicles(minutes, area)`.
 
 ---
 
@@ -140,6 +181,8 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 -- después: CREATE SCHEMA app; CREATE SCHEMA telemetry;
 -- hypertable: SELECT create_hypertable('telemetry.points', 'time');
+-- continuous aggregate: CREATE MATERIALIZED VIEW telemetry.stops ... (§3.1)
+--                       + add_continuous_aggregate_policy(...)
 ```
 
 El arranque está orquestado por Docker Compose (F1 del plan de desarrollo).
@@ -164,3 +207,4 @@ El arranque está orquestado por Docker Compose (F1 del plan de desarrollo).
 1. **Geocodificación:** ¿quién convierte `destination_address` → coordenadas? Opciones: geocoding en el cliente, al crear la orden en el backend (proveedor externo) o ambas. *Pendiente de decisión.*
 2. **Formato de entrada:** ¿el cliente envía `lat/lon` o dirección? Se recomienda aceptar ambas y persistir siempre la geometría.
 3. **SRID de trabajo:** se asume WGS84 (4326). Si los datos del proveedor vienen en otro SRID, convertir con `ST_Transform` en la frontera de entrada.
+4. **Umbrales de detección de paradas:** radio (propuesto 30 m), duración mínima (RF-10 sugiere 20 min) y corte por hueco de señal (propuesto 5 min) deben quedar como parámetros configurables, no fijados en código.
