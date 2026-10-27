@@ -1,0 +1,57 @@
+@startuml
+skinparam componentStyle rectangle
+skinparam backgroundColor #F9FBFD
+skinparam DefaultFontName Arial
+
+title Arquitectura de Microservicios - Tiendas-Track (Telemetría & Logística)
+
+' --- CAPA DE CLIENTES ---
+package "Capa de Clientes (React & React Native)" #LightCyan {
+    [Portal Web Multi-Rol\n(React / Next.js)] as WebPortal
+    [App Conductor\n(React Native + WatermelonDB)] as MobileApp
+}
+
+' --- CAPA DE ENTRADA Y SEGURIDAD ---
+package "Capa de Entrada" #LightYellow {
+    [API Gateway / BFF\n(Go - JWT & RBAC)] as Gateway
+}
+
+' --- CAPA DE MICROSERVICIOS ---
+package "Microservicios Core (Golang / Clean Architecture)" #LightGreen {
+    [Servicio de Órdenes y Trazabilidad\n(Go)] as OrderService
+    [Servicio de Telemetría\n(Go - Alta Concurrencia)] as TelemetryService
+    [Agente Operativo IA\n(LangChain / Go)] as AIAgent
+}
+
+' --- CAPA DE MENSAJERÍA ---
+package "Capa de Eventos" #MistyRose {
+    queue "Apache Kafka\n(Stream de Coordenadas)" as Kafka
+}
+
+' --- CAPA DE PERSISTENCIA ---
+package "Capa de Datos" #Lavender {
+    database "TimescaleDB\n(Telemetría / Series de Tiempo)" as Timescale
+    database "PostgreSQL\n(Usuarios, Tiendas, Órdenes)" as RelDB
+}
+
+' --- CONEXIONES ---
+WebPortal --> Gateway : HTTPS / REST / WebSockets
+MobileApp --> Gateway : HTTPS / REST (Sincronización Offline-First)
+
+Gateway --> OrderService : gRPC / REST
+Gateway --> TelemetryService : gRPC / REST
+Gateway --> AIAgent : gRPC / REST
+
+TelemetryService --> Kafka : Publica Coordenadas (GPS)
+Kafka --> OrderService : Consume Eventos de Ruta
+OrderService --> RelDB : CRUD Órdenes / Roles
+TelemetryService --> Timescale : Escritura Masiva (Series de Tiempo)
+
+AIAgent --> Timescale : Consulta de Tiempos y Estado de Flotas
+AIAgent --> RelDB : Consulta Metadatos de Tiendas/Pedidos
+
+' Notificaciones en tiempo real al WebPortal
+TelemetryService ..> Gateway : WebSockets / SSE (Push de Ubicación)
+Gateway ..> WebPortal : Stream de Ubicación Filtrado por Rol
+
+@enduml
