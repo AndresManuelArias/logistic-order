@@ -1,0 +1,53 @@
+@startuml
+skinparam componentStyle rectangle
+skinparam backgroundColor #F9FBFD
+skinparam DefaultFontName Arial
+
+title Arquitectura de Monolito Modular - Tiendas-Track (Go)
+
+' --- CAPA DE CLIENTES ---
+package "Capa de Clientes (React & React Native)" #LightCyan {
+    [Portal Web Multi-Rol\n(React / Next.js)] as WebPortal
+    [App Conductor\n(React Native + WatermelonDB)] as MobileApp
+}
+
+' --- EL MONOLITO MODULAR EN GO ---
+package "Monolito Modular Backend (Golang)" #LightGreen {
+    
+    [API Router / HTTP & WebSockets Server] as ApiRouter
+
+    package "Módulos Internos (Clean Architecture)" #AliceBlue {
+        [Módulo de Autenticación & RBAC] as AuthModule
+        [Módulo de Órdenes y Logística] as OrderModule
+        [Módulo de Telemetría (GPS)] as TelemetryModule
+        [Módulo Agente de IA] as AIAgentModule
+    }
+
+    ApiRouter --> AuthModule : Valida Permisos
+    ApiRouter --> OrderModule : Gestiona Órdenes
+    ApiRouter --> TelemetryModule : Ingesta / Consulta Coordenadas
+    ApiRouter --> AIAgentModule : Consultas en NL
+
+    ' Comunicación interna desacoplada por interfaces
+    TelemetryModule --> OrderModule : Eventos internos (Go Channels)
+}
+
+' --- CAPA DE PERSISTENCIA ---
+package "Capa de Datos" #Lavender {
+    database "TimescaleDB / PostgreSQL\n(Datos Relacionales + Series de Tiempo)" as DB
+}
+
+' --- CONEXIONES ---
+WebPortal --> ApiRouter : HTTPS / REST / WebSockets
+MobileApp --> ApiRouter : HTTPS / REST (Sync Offline-First)
+
+AuthModule --> DB : Lee/Escribe Usuarios
+OrderModule --> DB : Lee/Escribe Órdenes
+TelemetryModule --> DB : Escritura Masiva de Coordenadas
+AIAgentModule --> DB : Consultas Analíticas de Flotas
+
+' Push en tiempo real
+TelemetryModule ..> ApiRouter : WebSockets / SSE
+ApiRouter ..> WebPortal : Stream de Ubicación por Rol
+
+@enduml
