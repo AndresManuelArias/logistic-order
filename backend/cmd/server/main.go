@@ -85,17 +85,17 @@ func run() error {
 	ordersRepo := orderspostgres.NewOrderRepository(pool)
 
 	// Casos de uso.
-	ordersUC := ordersusecase.New(ordersRepo)
+	ordersUC := ordersusecase.New(ordersRepo, log)
 	// El módulo auth no conoce al de orders: se le inyecta una función que
 	// decide si el llamante puede emitir un token de invitado sobre la orden.
 	authUC := authusecase.New(userRepo, userRepo, refreshRepo, guestRepo,
-		tokenAdapter, hasher, ordersUC.IsAccessibleBy)
+		tokenAdapter, hasher, ordersUC.IsAccessibleBy, log)
 
 	handler := httpserver.NewWithModules(log, pool, httpserver.Options{
 		Token: tokenSvc,
 		Modules: httpserver.Modules{
-			Auth:   authdelivery.NewHandler(authUC),
-			Orders: ordersdelivery.NewHandler(ordersUC),
+			Auth:   authdelivery.NewHandler(authUC, log),
+			Orders: ordersdelivery.NewHandler(ordersUC, log),
 		},
 	})
 

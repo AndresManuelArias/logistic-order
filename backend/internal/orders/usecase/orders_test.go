@@ -3,12 +3,20 @@ package usecase
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
 	"tiendas-track/backend/internal/orders/domain"
 	"tiendas-track/backend/internal/shared/authz"
 )
+
+// nullWriter descarta la salida del logger en tests.
+type nullWriter struct{}
+
+func (nullWriter) Write(p []byte) (n int, err error) { return len(p), nil }
+
+var testLog = slog.New(slog.NewTextHandler(&nullWriter{}, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 // fakeOrders implementa OrderRepository con memoria y scope observable.
 type fakeOrders struct {
@@ -103,7 +111,7 @@ func validInput(ref, storeID string) CreateOrderInput {
 func TestCreateAislamientoPorTienda(t *testing.T) {
 	f := newFakeOrders()
 	f.stores["store-a"] = true
-	uc := New(f)
+	uc := New(f, testLog)
 	ctx := context.Background()
 
 	if _, err := uc.Create(ctx, storePrincipal("store-a"), validInput("REF-1", "store-a")); err != nil {
@@ -118,7 +126,7 @@ func TestCreateAislamientoPorTienda(t *testing.T) {
 
 // Un invitado y un conductor no pueden crear órdenes.
 func TestCreateRolesNoPermitidos(t *testing.T) {
-	uc := New(newFakeOrders())
+	uc := New(newFakeOrders(), testLog)
 	ctx := context.Background()
 	guest := authz.Principal{TokenType: authz.GuestToken, Scope: "order:x"}
 	driver := authz.Principal{TokenType: authz.AccessToken, Role: authz.RoleDriver, DriverID: "d1"}
@@ -135,7 +143,7 @@ func TestCreateRolesNoPermitidos(t *testing.T) {
 func TestCreateValidacion(t *testing.T) {
 	f := newFakeOrders()
 	f.stores["s1"] = true
-	uc := New(f)
+	uc := New(f, testLog)
 	p := storePrincipal("s1")
 	ctx := context.Background()
 
@@ -154,7 +162,7 @@ func TestCreateValidacion(t *testing.T) {
 func TestCreateDuplicado(t *testing.T) {
 	f := newFakeOrders()
 	f.stores["s1"] = true
-	uc := New(f)
+	uc := New(f, testLog)
 	p := storePrincipal("s1")
 	ctx := context.Background()
 	if _, err := uc.Create(ctx, p, validInput("DUP", "s1")); err != nil {
@@ -170,7 +178,7 @@ func TestGetAislamientoPorRol(t *testing.T) {
 	f := newFakeOrders()
 	f.stores["s1"] = true
 	f.vehicleProviders["veh-1"] = "prov-1"
-	uc := New(f)
+	uc := New(f, testLog)
 	ctx := context.Background()
 
 	created, err := uc.Create(ctx, storePrincipal("s1"), validInput("G1", "s1"))
@@ -212,7 +220,7 @@ func TestGetAislamientoPorRol(t *testing.T) {
 // List siempre envía el scope del rol al repositorio (nunca sin filtro).
 func TestListAplicaScopeDelRol(t *testing.T) {
 	f := newFakeOrders()
-	uc := New(f)
+	uc := New(f, testLog)
 	ctx := context.Background()
 
 	if _, _, err := uc.List(ctx, storePrincipal("s1"), nil, 0, 0); err != nil {
@@ -248,7 +256,7 @@ func TestListAplicaScopeDelRol(t *testing.T) {
 func TestChangeStatusAutorizacionYTransicion(t *testing.T) {
 	f := newFakeOrders()
 	f.stores["s1"] = true
-	uc := New(f)
+	uc := New(f, testLog)
 	ctx := context.Background()
 
 	o, err := uc.Create(ctx, storePrincipal("s1"), validInput("S1", "s1"))
@@ -299,7 +307,7 @@ func TestAssignScopeDeFlota(t *testing.T) {
 	f.vehicleProviders["veh-mio"] = "prov-1"
 	f.vehicleProviders["veh-ajeno"] = "prov-2"
 	f.driverVehicles["d-mio"] = "veh-mio"
-	uc := New(f)
+	uc := New(f, testLog)
 	ctx := context.Background()
 
 	o, _ := uc.Create(ctx, storePrincipal("s1"), validInput("A1", "s1"))
@@ -336,7 +344,7 @@ func TestAssignScopeDeFlota(t *testing.T) {
 func TestIsAccessibleBy(t *testing.T) {
 	f := newFakeOrders()
 	f.stores["s1"] = true
-	uc := New(f)
+	uc := New(f, testLog)
 	ctx := context.Background()
 
 	o, _ := uc.Create(ctx, storePrincipal("s1"), validInput("IA", "s1"))

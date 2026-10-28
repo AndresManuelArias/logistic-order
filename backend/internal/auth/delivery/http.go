@@ -5,6 +5,7 @@ package delivery
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -13,15 +14,19 @@ import (
 	"tiendas-track/backend/internal/shared/authz"
 	"tiendas-track/backend/internal/shared/httperr"
 	"tiendas-track/backend/internal/shared/middleware"
+	"tiendas-track/backend/internal/tracing"
 )
 
 // Handler expone los endpoints de autenticación.
 type Handler struct {
-	uc *usecase.AuthUseCase
+	uc  *usecase.AuthUseCase
+	log *slog.Logger
 }
 
 // NewHandler crea el handler.
-func NewHandler(uc *usecase.AuthUseCase) *Handler { return &Handler{uc: uc} }
+func NewHandler(uc *usecase.AuthUseCase, log *slog.Logger) *Handler {
+	return &Handler{uc: uc, log: log}
+}
 
 // RegisterRoutes monta /api/v1/auth/*.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler) {
@@ -56,11 +61,21 @@ type pointDTO struct {
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	traceID, _ := tracing.CorrelationIDFromContext(r.Context())
+
 	var req registerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.Error("Register: JSON inválido", "trace_id", traceID, "error", err.Error())
 		httperr.BadRequest(w, "INVALID_JSON", "cuerpo JSON inválido")
 		return
 	}
+
+	h.log.Info("Register: procesando solicitud",
+		"trace_id", traceID,
+		"email", req.Email,
+		"role", req.Role,
+	)
+
 	in := usecase.RegisterInput{
 		Email: req.Email, Password: req.Password, FullName: req.FullName,
 		Role: strings.ToUpper(req.Role),
@@ -71,11 +86,23 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			in.Store.Lat, in.Store.Lon = req.Store.Location.Lat, req.Store.Location.Lon
 		}
 	}
+
 	u, err := h.uc.Register(r.Context(), in)
 	if err != nil {
+		h.log.Error("Register: error en caso de uso",
+			"trace_id", traceID,
+			"error", err.Error(),
+		)
 		mapAuthError(w, err)
 		return
 	}
+
+	h.log.Info("Register: usuario creado exitosamente",
+		"trace_id", traceID,
+		"user_id", u.ID,
+		"role", u.Role,
+	)
+
 	writeJSON(w, http.StatusCreated, toUserResponse(u))
 }
 
@@ -85,16 +112,36 @@ type loginRequest struct {
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	traceID, _ := tracing.CorrelationIDFromContext(r.Context())
+
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.Error("Login: JSON inválido", "trace_id", traceID, "error", err.Error())
 		httperr.BadRequest(w, "INVALID_JSON", "cuerpo JSON inválido")
 		return
 	}
+
+	h.log.Info("Login: procesando solicitud",
+		"trace_id", traceID,
+		"email", req.Email,
+	)
+
 	pair, err := h.uc.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
+		h.log.Error("Login: error en caso de uso",
+			"trace_id", traceID,
+			"error", err.Error(),
+		)
 		mapAuthError(w, err)
 		return
 	}
+
+	h.log.Info("Login: login exitoso",
+		"trace_id", traceID,
+		"user_id", pair.User.ID,
+		"role", pair.User.Role,
+	)
+
 	writeJSON(w, http.StatusOK, pair)
 }
 
@@ -103,29 +150,63 @@ type refreshRequest struct {
 }
 
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	traceID, _ := tracing.CorrelationIDFromContext(r.Context())
+
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.RefreshToken) == "" {
+		h.log.Error("Refresh: JSON inválido o refresh_token vacío", "trace_id", traceID)
 		httperr.BadRequest(w, "INVALID_JSON", "refresh_token requerido")
 		return
 	}
+
+	h.log.Info("Refresh: procesando solicitud",
+		"trace_id", traceID,
+	)
+
 	pair, err := h.uc.Refresh(r.Context(), req.RefreshToken)
 	if err != nil {
+		h.log.Error("Refresh: error en caso de uso",
+			"trace_id", traceID,
+			"error", err.Error(),
+		)
 		mapAuthError(w, err)
 		return
 	}
+
+	h.log.Info("Refresh: refresh exitoso",
+		"trace_id", traceID,
+	)
+
 	writeJSON(w, http.StatusOK, pair)
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	traceID, _ := tracing.CorrelationIDFromContext(r.Context())
+
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.RefreshToken) == "" {
+		h.log.Error("Logout: JSON inválido o refresh_token vacío", "trace_id", traceID)
 		httperr.BadRequest(w, "INVALID_JSON", "refresh_token requerido")
 		return
 	}
+
+	h.log.Info("Logout: procesando solicitud",
+		"trace_id", traceID,
+	)
+
 	if err := h.uc.Logout(r.Context(), req.RefreshToken); err != nil {
+		h.log.Error("Logout: error en caso de uso",
+			"trace_id", traceID,
+			"error", err.Error(),
+		)
 		mapAuthError(w, err)
 		return
 	}
+
+	h.log.Info("Logout: logout exitoso",
+		"trace_id", traceID,
+	)
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -134,35 +215,74 @@ type guestRequest struct {
 }
 
 func (h *Handler) GuestToken(w http.ResponseWriter, r *http.Request) {
+	traceID, _ := tracing.CorrelationIDFromContext(r.Context())
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok {
+		h.log.Error("GuestToken: no autenticado", "trace_id", traceID)
 		httperr.Unauthenticated(w, "no autenticado")
 		return
 	}
+
 	var req guestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.Error("GuestToken: JSON inválido", "trace_id", traceID, "error", err.Error())
 		httperr.BadRequest(w, "INVALID_JSON", "cuerpo JSON inválido")
 		return
 	}
+
+	h.log.Info("GuestToken: procesando solicitud",
+		"trace_id", traceID,
+		"order_id", req.OrderID,
+		"caller_role", p.Role,
+	)
+
 	out, err := h.uc.GuestToken(r.Context(), p, strings.TrimSpace(req.OrderID))
 	if err != nil {
+		h.log.Error("GuestToken: error en caso de uso",
+			"trace_id", traceID,
+			"error", err.Error(),
+		)
 		mapAuthError(w, err)
 		return
 	}
+
+	h.log.Info("GuestToken: token de invitado emitido exitosamente",
+		"trace_id", traceID,
+		"order_id", out.OrderID,
+	)
+
 	writeJSON(w, http.StatusCreated, out)
 }
 
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
+	traceID, _ := tracing.CorrelationIDFromContext(r.Context())
 	p, ok := middleware.PrincipalFrom(r.Context())
 	if !ok || p.IsGuest() {
+		h.log.Error("Me: no autenticado", "trace_id", traceID)
 		httperr.Unauthenticated(w, "no autenticado")
 		return
 	}
+
+	h.log.Info("Me: obteniendo información de usuario",
+		"trace_id", traceID,
+		"user_id", p.UserID,
+	)
+
 	u, err := h.uc.Me(r.Context(), p.UserID)
 	if err != nil {
+		h.log.Error("Me: error en caso de uso",
+			"trace_id", traceID,
+			"error", err.Error(),
+		)
 		mapAuthError(w, err)
 		return
 	}
+
+	h.log.Info("Me: información de usuario obtenida exitosamente",
+		"trace_id", traceID,
+		"user_id", u.ID,
+	)
+
 	writeJSON(w, http.StatusOK, toUserResponse(u))
 }
 

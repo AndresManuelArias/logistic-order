@@ -18,6 +18,7 @@ import (
 	"tiendas-track/backend/internal/shared/middleware"
 	"tiendas-track/backend/internal/shared/openapi"
 	"tiendas-track/backend/internal/shared/token"
+	"tiendas-track/backend/internal/tracing"
 )
 
 // Modules agrupa los handlers de los módulos de negocio a montar en el router.
@@ -74,7 +75,7 @@ func NewWithModules(log *slog.Logger, db *pgxpool.Pool, opts Options) http.Handl
 		log.Warn("router: sin JWT_SECRET/servicio de token; los módulos de negocio no se montan")
 	}
 
-	return r.recover(mux)
+	return r.logging(r.recover(tracing.TracingMiddleware(mux)))
 }
 
 // healthz: liveness. No toca la base de datos: sirve para saber si el
@@ -110,16 +111,59 @@ func (r *router) root(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// logging agrega logging estructurado con correlation ID a cada request.
+func (r *router) logging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		start := time.Now()
+		traceID, _ := tracing.CorrelationIDFromContext(req.Context())
+
+		r.log.Info("request iniciada",
+			"trace_id", traceID,
+			"method", req.Method,
+			"path", req.URL.Path,
+			"remote", req.RemoteAddr,
+		)
+
+		// Capture response status code
+		rr := newResponseRecorder(w)
+		next.ServeHTTP(rr, req)
+
+		elapsed := time.Since(start)
+		r.log.Info("request completada",
+			"trace_id", traceID,
+			"method", req.Method,
+			"path", req.URL.Path,
+			"status", rr.status,
+			"duration_ms", elapsed.Milliseconds(),
+		)
+	})
+}
+
 func (r *router) recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				r.log.Error("panic atendiendo petición", "path", req.URL.Path, "panic", rec)
+				traceID, _ := tracing.CorrelationIDFromContext(req.Context())
+				r.log.Error("panic atendiendo petición", "trace_id", traceID, "path", req.URL.Path, "panic", rec)
 				httperr.Write(w, http.StatusInternalServerError, "INTERNAL", "error interno")
 			}
 		}()
 		next.ServeHTTP(w, req)
 	})
+}
+
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
+	return &responseRecorder{ResponseWriter: w, status: http.StatusOK}
+}
+
+func (rr *responseRecorder) WriteHeader(code int) {
+	rr.status = code
+	rr.ResponseWriter.WriteHeader(code)
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

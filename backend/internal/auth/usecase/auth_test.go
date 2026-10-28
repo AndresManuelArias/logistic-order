@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -141,9 +142,15 @@ func setup(t *testing.T, allowOrder bool) (*AuthUseCase, *fakeRefresh, *fakeGues
 	refresh := &fakeRefresh{}
 	guests := &fakeGuests{}
 	checker := func(context.Context, string, authz.Principal) (bool, error) { return allowOrder, nil }
-	uc := New(users, users, refresh, guests, &fakeTokens{}, fakeHasher{}, checker)
+	log := slog.New(slog.NewTextHandler(&nullWriter{}, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	uc := New(users, users, refresh, guests, &fakeTokens{}, fakeHasher{}, checker, log)
 	return uc, refresh, guests
 }
+
+// nullWriter descarta la salida del logger en tests.
+type nullWriter struct{}
+
+func (nullWriter) Write(p []byte) (n int, err error) { return len(p), nil }
 
 // Registro: solo STORE/DRIVER y con validación de email/contraseña.
 func TestRegisterValidaEntrada(t *testing.T) {
