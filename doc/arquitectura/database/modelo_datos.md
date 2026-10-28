@@ -91,6 +91,7 @@ SELECT id FROM orders WHERE ST_Contains(:zona::geography::geometry, destination)
 | `orders` | PK `id`, FK `store_id`, `assigned_vehicle_id?`, `assigned_driver_id?`, `customer_id?` | Orden con `origin` y **`destination` (PostGIS)**. |
 | `order_events` | PK `id`, FK `order_id → orders` | Historial append-only de transiciones. |
 | `guest_tokens` | PK `id`, FK `order_id → orders` | Token de invitado para que el Cliente Final rastree su orden. |
+| `refresh_tokens` | PK `id`, FK `user_id → users`, `token_hash` UNIQUE | Refresh token **rotativo** guardado solo como hash SHA-256 (F2). Al rotar se marca `revoked` y se enlaza `replaced_by`. |
 | `sync_receipts` | PK `id`, `idempotency_key` UNIQUE | Control de duplicados del Bulk Sync offline. |
 | `ai_query_log` | PK `id`, FK `user_id → users` | Auditoría de cada consulta al agente IA. |
 

@@ -94,6 +94,11 @@ paths:
       description: |
         Solo admite `role` igual a `STORE` o `DRIVER`. La cuenta de proveedor
         (`PROVIDER`) se crea por seed/administración (RF-01).
+
+        Con `role=STORE` el objeto `store` es **obligatorio**: la tienda nace
+        junto a su dueño porque `orders.store_id` referencia `app.stores` y
+        todo recurso geográfico exige coordenadas (PostGIS, ADR-09).
+        Con `role=DRIVER` el objeto `store` se ignora.
       requestBody:
         required: true
         content:
@@ -114,17 +119,39 @@ paths:
                 role:
                   type: string
                   enum: [STORE, DRIVER]
+                store:
+                  type: object
+                  description: Obligatorio cuando `role=STORE`.
+                  required: [name, location]
+                  properties:
+                    name:
+                      type: string
+                    address:
+                      type: string
+                    location:
+                      $ref: "#/components/schemas/Point"
             examples:
               tienda:
-                summary: Registro de tienda
+                summary: Registro de tienda con georreferenciación
                 value:
                   email: tienda@example.com
                   password: secreto123
                   full_name: Tienda Central
                   role: STORE
+                  store:
+                    name: Tienda La Esquina
+                    address: Cra 7 # 72-40, Bogotá
+                    location: { lat: 4.6550, lon: -74.0632 }
+              conductor:
+                summary: Registro de conductor
+                value:
+                  email: conductor@example.com
+                  password: secreto123
+                  full_name: Carlos Ramírez
+                  role: DRIVER
       responses:
         "201":
-          description: Usuario creado.
+          description: Usuario creado (y su tienda, si `role=STORE`).
           content:
             application/json:
               schema:

@@ -36,6 +36,43 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
+// CreateWithStore crea el usuario STORE y su tienda en una transacción:
+// si la tienda no puede crearse, el usuario tampoco queda registrado.
+func (r *UserRepository) CreateWithStore(ctx context.Context, u *domain.User, p *domain.StoreProfile) (string, error) {
+	if p == nil {
+		return "", fmt.Errorf("users.create_with_store: perfil de tienda requerido")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("users.create_with_store.begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // el commit es el camino feliz
+
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO app.users (email, password_hash, full_name, role)
+		VALUES ($1, $2, $3, $4::app.role_enum)
+		RETURNING id::text, created_at, updated_at`,
+		u.Email, u.PasswordHash, u.FullName, u.Role,
+	).Scan(&u.ID, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		return "", fmt.Errorf("users.create_with_store.user: %w", err)
+	}
+
+	var storeID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO app.stores (name, owner_user_id, address, location)
+		VALUES ($1, $2::uuid, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326))
+		RETURNING id::text`,
+		p.Name, u.ID, p.Address, p.Lon, p.Lat,
+	).Scan(&storeID); err != nil {
+		return "", fmt.Errorf("users.create_with_store.store: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("users.create_with_store.commit: %w", err)
+	}
+	return storeID, nil
+}
+
 // FindByEmail busca por email (case-insensitive: el caso se normaliza al llamar).
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	return r.single(ctx, `SELECT `+userCols+` FROM app.users WHERE email = $1`, email)

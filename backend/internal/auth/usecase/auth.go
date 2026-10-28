@@ -57,6 +57,10 @@ type RegisterInput struct {
 	Password string
 	FullName string
 	Role     string
+
+	// Store es obligatorio cuando Role == STORE (la tienda nace con su dueño).
+	// Address es opcional; Name y coordenadas son requeridos (ADR-09).
+	Store *domain.StoreProfile
 }
 
 // TokenPair es la salida de login/refresh.
@@ -92,6 +96,14 @@ func (uc *AuthUseCase) Register(ctx context.Context, in RegisterInput) (*domain.
 		return nil, domain.ErrEmailAlreadyRegistered
 	}
 
+	// El rol STORE nace con su tienda (RF-02): sin perfil no hay aislamiento
+	// de datos posible, porque orders.store_id referencia app.stores.
+	if in.Role == authz.RoleStore {
+		if err := normalizeStore(in.Store); err != nil {
+			return nil, err
+		}
+	}
+
 	hash, err := uc.hasher.Hash(in.Password)
 	if err != nil {
 		return nil, fmt.Errorf("hash de contraseña: %w", err)
@@ -104,11 +116,29 @@ func (uc *AuthUseCase) Register(ctx context.Context, in RegisterInput) (*domain.
 		Role:         in.Role,
 		Status:       "ACTIVE",
 	}
-	if err := uc.users.Create(ctx, u); err != nil {
+	if in.Role == authz.RoleStore {
+		// Usuario + tienda en una sola transacción (consistencia).
+		if _, err := uc.users.CreateWithStore(ctx, u, in.Store); err != nil {
+			return nil, err
+		}
+	} else if err := uc.users.Create(ctx, u); err != nil {
 		return nil, err
 	}
 	u.PasswordHash = "" // nunca exponer el hash
 	return u, nil
+}
+
+// normalizeStore normaliza y valida el perfil de tienda del registro STORE.
+func normalizeStore(s *domain.StoreProfile) error {
+	if s == nil {
+		return fmt.Errorf("%w: falta la información de la tienda (name, lat, lon)", domain.ErrValidation)
+	}
+	s.Name = strings.TrimSpace(s.Name)
+	s.Address = strings.TrimSpace(s.Address)
+	if !s.Valid() {
+		return fmt.Errorf("%w: la tienda requiere nombre y coordenadas válidas (PostGIS, ADR-09)", domain.ErrValidation)
+	}
+	return nil
 }
 
 // Login valida credenciales y emite el par de tokens.

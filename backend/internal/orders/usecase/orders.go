@@ -48,7 +48,9 @@ func (uc *OrdersUseCase) Create(ctx context.Context, p authz.Principal, in Creat
 	if in.StoreID == "" {
 		in.StoreID = p.StoreID
 	}
-	if in.StoreID != p.StoreID {
+	// Un principal sin tienda asociada (registro incompleto/ dato corrupto)
+	// no puede operar: se rechaza como scope en lugar de fallar en SQL.
+	if p.StoreID == "" || in.StoreID != p.StoreID {
 		return nil, domain.ErrForbiddenScope
 	}
 

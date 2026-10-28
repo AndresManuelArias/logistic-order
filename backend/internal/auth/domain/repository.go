@@ -8,6 +8,10 @@ import (
 // UserRepository persiste usuarios.
 type UserRepository interface {
 	Create(ctx context.Context, u *User) error
+	// CreateWithStore crea el usuario y su tienda en la misma transacción
+	// (registro de rol STORE): o ambas existen, o ninguna.
+	// El storeID resultante se devuelve; profile nunca puede ser nil.
+	CreateWithStore(ctx context.Context, u *User, profile *StoreProfile) (storeID string, err error)
 	FindByEmail(ctx context.Context, email string) (*User, error)
 	FindByID(ctx context.Context, id string) (*User, error)
 }

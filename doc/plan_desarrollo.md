@@ -124,7 +124,8 @@
 
 ### ADR-10 — Documentación de API: OpenAPI 3 (Swagger) como fuente de verdad
 
-- **Todo endpoint REST** del backend se documenta con una especificación **OpenAPI 3** en `doc/api/openapi.yaml`.
+- **Todo endpoint REST** del backend se documenta con una especificación **OpenAPI 3** en `backend/api/openapi.yaml`.
+- **Ubicación (decisión F2):** la spec vive en `backend/api/` (y no en `doc/`) para poder embebirla en el binario con `go:embed` (Go no permite `..` en embed): así Swagger se sirve siempre, sin depender de ficheros externos en la imagen. El fichero sigue siendo el contrato revisable en el repositorio y la copia en `doc/` no existe: **un solo canónico**.
 - El servidor la sirve en runtime: **Swagger UI** en `/swagger/index.html` y el spec en JSON en `/api/v1/openapi.json`.
 - El spec es la **fuente de verdad de los contratos**: el frontend y la app móvil generan/validan sus clientes a partir de él (generación de tipos con `openapi-typescript` / `openapi-generator`), y `qa` valida que la implementación cumple el spec.
 - **Criterio:** un endpoint sin entrada/salida documentada en el spec está incompleto ( Definition of Done ). El spec se actualiza en la misma tarea que cambia el endpoint.
@@ -222,7 +223,7 @@ mobile/src/
 ## 6. Contrato API (v1) — resumen
 
 > **Requerimiento explícito: todos los endpoints deben documentarse con Swagger (OpenAPI 3).**
-> Fuente de verdad: `doc/api/openapi.yaml` (OpenAPI 3.1). El backend la sirve como **Swagger UI** en `GET /swagger/index.html` y como spec JSON en `GET /api/v1/openapi.json`. Este resumen es solo el alcance mínimo; **el spec define el contrato real**.
+> Fuente de verdad: `backend/api/openapi.yaml` (OpenAPI 3.1). El backend la sirve como **Swagger UI** en `GET /swagger/index.html` y como spec JSON en `GET /api/v1/openapi.json`. Este resumen es solo el alcance mínimo; **el spec define el contrato real**.
 
 **Documentación interactiva:**
 - `GET /swagger/index.html` → Swagger UI (probar endpoints desde el navegador con autorización `Bearer`).
@@ -264,7 +265,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | Fase | Estado | Evidencia |
 |---|---|---|
 | **F1** | ✅ **Completada (2026-10-28)** | `docker compose up` OK; `/healthz` y `/readyz` 200; 4 migraciones aplicadas; hypertable + continuous aggregate + retención verificadas |
-| F2 | ⬜ Pendiente | — |
+| **F2** | ✅ **Completada (2026-10-28)** | Módulos `auth` y `orders` + migración `0005_auth`; JWT HS256 con refresh rotativo (hash SHA-256); RBAC de rol y de datos server-side; máquina de estados con `order_events` transaccional; spec OpenAPI 3.1 embebida (`/swagger/index.html`, `/api/v1/openapi.json|yaml`); seed (1 proveedor, 2 tiendas, 3 conductores, 3 vehículos, 10 órdenes georreferenciadas); `go test ./...` OK y e2e `scripts/e2e_f2.sh` 60/60 casos OK |
 | F3 | ⬜ Pendiente | — |
 | F4 | ⬜ Pendiente | — |
 | F5 | ⬜ Pendiente | — |
@@ -295,7 +296,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   3. Módulo `orders`: CRUD, máquina de estados, `order_events`, asignación de flota (RF-06).
   4. Token de invitado para Cliente Final, con expiración y scope `order:<id>`.
   5. Seed de datos demo (1 proveedor, 2 tiendas con `location`, 3 conductores, 10 órdenes **con `origin` y `destination` georreferenciadas**).
-  6. **Swagger/OpenAPI:** especificación `doc/api/openapi.yaml` (OpenAPI 3.1) con todos los endpoints de F2, servida como Swagger UI en `/swagger/index.html` y spec JSON en `/api/v1/openapi.json`.
+  6. **Swagger/OpenAPI:** especificación `backend/api/openapi.yaml` (OpenAPI 3.1) con todos los endpoints de F2, servida como Swagger UI en `/swagger/index.html` y spec JSON en `/api/v1/openapi.json`.
 - **Criterio de aceptación:** un usuario de un rol **nunca** puede leer recursos de otro rol (probado); transiciones inválidas → 409.
 - **Pruebas:** unitarias de dominio y casos de uso; integración API del happy path y de denegación por rol.
 
@@ -320,13 +321,13 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   1. Monorepo con `@tiendas/tracking-core` (hook `useTracking(channel)`, reconexión con backoff, estado de conexión) y `@tiendas/tracking-ui` (mapa con capa de vehículos, tarjeta de orden, barra de progreso).
   2. Portal Next.js: login, panel Proveedor (flota global + mapa), panel Tendero (dual entrada/salida), vista pública de orden por token de invitado, panel de chat IA.
   3. RBAC en rutas y render condicional (la autoridad sigue siendo el servidor).
-  4. Generar/validar los tipos y cliente HTTP desde `doc/api/openapi.yaml` (ADR-10), sin duplicar definiciones de DTOs a mano.
+  4. Generar/validar los tipos y cliente HTTP desde `backend/api/openapi.yaml` (ADR-10), sin duplicar definiciones de DTOs a mano.
 - **Tareas móvil:**
   1. Login del conductor, lista de órdenes del día, detalle con prueba de entrega.
   2. Servicio de geolocalización en segundo plano → cola `SyncQueueManager` (WatermelonDB/SQLite).
   3. Detección de red (NetInfo) → Bulk Sync con idempotency key; barra de estado "X puntos pendientes".
   4. Transiciones de orden offline con cola de eventos.
-  5. Cliente API tipado generado desde `doc/api/openapi.yaml` (ADR-10) para login, órdenes y bulk sync.
+  5. Cliente API tipado generado desde `backend/api/openapi.yaml` (ADR-10) para login, órdenes y bulk sync.
 - **Criterio de aceptación:** modo avión → los puntos se acumulan localmente; al reactivar la red se sincronizan **sin duplicar** (verificado en backend). El portal renderiza las tres vistas con datos reales.
 - **Pruebas:** unitarias de `tracking-core`, E2E del flujo de sync (Playwright/Detox), verificación básica de accesibilidad (contraste, teclado).
 
@@ -350,7 +351,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   2. Terraform (o CDK) mínimo: red, base de datos, servicio, secretos.
   3. GitHub Actions: lint + test backend, lint + build web, build móvil con Fastlane.
   4. Auditoría de seguridad (checklist §9.4) + README con decisiones de arquitectura y **auditoría del uso de la IA** (requisito de evaluación).
-  5. **Validación de contrato:** verificar con **Spectral** (lint del spec) o un test de contrato propio que `doc/api/openapi.yaml` coincide con las respuestas reales del servidor (spec ↔ implementación sincronizados).
+  5. **Validación de contrato:** verificar con **Spectral** (lint del spec) o un test de contrato propio que `backend/api/openapi.yaml` coincide con las respuestas reales del servidor (spec ↔ implementación sincronizados).
 - **Criterio de aceptación:** pipeline verde; k6 cumple umbrales; `terraform plan` sin errores.
 
 ---
@@ -387,7 +388,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - [ ] Pruebas unitarias del camino feliz y del camino de error/denegación.
 - [ ] Respeta la arquitectura de capas de su módulo (sin `usecase` importando frameworks, sin `domain` importando infraestructura).
 - [ ] Manejo de errores tipado y códigos HTTP correctos.
-- [ ] **Endpoint documentado en `doc/api/openapi.yaml` (Swagger) con request/response y códigos de error; Swagger UI se actualiza sin errores de validación.**
+- [ ] **Endpoint documentado en `backend/api/openapi.yaml` (Swagger) con request/response y códigos de error; Swagger UI se actualiza sin errores de validación.**
 - [ ] Documentación afectada actualizada.
 - [ ] Si toca seguridad: revisión del agente `security`.
 
@@ -412,13 +413,14 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | # | Tema | Tipo | Nota |
 |---|---|---|---|
 | R1 | `estructura_carpeta_portal_web_multi_rol.md` está duplicado con la estructura móvil | **Doc defectuoso** | Corregir o reemplazar por la §4.2 |
-| R2 | `doc/api/openapi.yaml` aún no existe (Swagger hoy no implementado) | Pendiente | Crearlo en F2 (ADR-10) y mantenerlo sincronizado en cada endpoint |
+| R2 | Spec OpenAPI desincronizándose de la implementación | **Mitigado en F2** | Spec creada y embebida en el binario; test `internal/shared/openapi` exige que cubra todos los endpoints F2. Mantenerla en cada tarea de endpoint (ADR-10) y validar en F6 con Spectral |
 | R3 | Motor LLM y proveedor de mapas sin definir | **Decisión pendiente** | Afecta coste, claves y latencia; configurable por env |
 | R4 | Volumen real de vehículos y frecuencia de GPS desconocida | **Supuesto** | El plan asume cientos de vehículos (RNF-06); no hay cifras confirmadas |
 | R5 | Retención y coste de TimescaleDB no definidos | Pendiente | Definir política de retención antes de producción |
 | R6 | WebSockets detrás de reverse proxy/load balancer | Riesgo | Exigir soporte de upgrade (sticky/WS-aware) al desplegar |
 | R7 | La arquitectura de microservicios documentada no se implementa en esta fase | **ADR-01** | Documentar en el README el camino de extracción futura |
 | R8 | No hay definición de notificaciones (email/SMS) a tenderos/clientes | Fuera de alcance | Confirmar si se incluye o se excluye explícitamente |
+| R11 | Registro `STORE` crea la fila de `stores` junto al usuario (supuesto F2) | **Supuesto** | Deriva de que `orders.store_id` es NOT NULL y de la georreferenciación obligatoria (ADR-09); confirmar con el usuario si el tendero debe registrar su tienda en un paso posterior |
 | R10 | Swagger spec desincronizado de la implementación | Riesgo | Mitigado por ADR-10: el spec se actualiza en la misma tarea del endpoint + validación de contrato en F6 |
 | R9 | Origen de la geocodificación de `orders.destination` sin definir | **Pendiente** | ¿El cliente envía lat/lon o dirección? Definir quién geocodifica (cliente, backend o proveedor externo) — ver `doc/arquitectura/database/modelo_datos.md` §6 |
 
@@ -433,6 +435,6 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - [ ] El camino offline→online del móvil no duplica datos (idempotencia extremo a extremo).
 - [ ] Las decisiones ADR-01…ADR-10 están reflejadas en el código o documentadas como pendientes.
 - [ ] Todas las columnas geográficas usan `geometry(Point,4326)` con índice GiST (PostGIS) y `orders.destination` está poblada en las órdenes de seed.
-- [ ] `doc/api/openapi.yaml` cubre el 100 % de los endpoints REST y Swagger UI carga sin errores de validación (ADR-10).
+- [ ] `backend/api/openapi.yaml` cubre el 100 % de los endpoints REST y Swagger UI carga sin errores de validación (ADR-10).
 - [ ] Web y móvil consumen los tipos/contratos generados del spec OpenAPI.
 - [ ] El README incluye decisiones de arquitectura y auditoría del uso de la IA.

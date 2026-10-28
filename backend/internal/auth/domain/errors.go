@@ -21,4 +21,6 @@ var (
 	ErrUserSuspended = errors.New("usuario suspendido")
 	// ErrOrderAccess: invitado sin acceso a la orden solicitada.
 	ErrOrderAccess = errors.New("sin acceso a la orden")
+	// ErrValidation: datos de entrada inválidos (reglas de negocio).
+	ErrValidation = errors.New("datos inválidos")
 )

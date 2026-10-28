@@ -38,6 +38,21 @@ type registerRequest struct {
 	Password string `json:"password"`
 	FullName string `json:"full_name"`
 	Role     string `json:"role"`
+	// Store es obligatorio para role=STORE: la tienda nace con su dueño.
+	Store *storePayload `json:"store"`
+}
+
+// storePayload es la georreferenciación de la tienda (ADR-09: PostGIS).
+type storePayload struct {
+	Name     string    `json:"name"`
+	Address  string    `json:"address"`
+	Location *pointDTO `json:"location"`
+}
+
+// pointDTO es una coordenada WGS84 en el contrato HTTP.
+type pointDTO struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -46,9 +61,17 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		httperr.BadRequest(w, "INVALID_JSON", "cuerpo JSON inválido")
 		return
 	}
-	u, err := h.uc.Register(r.Context(), usecase.RegisterInput{
-		Email: req.Email, Password: req.Password, FullName: req.FullName, Role: strings.ToUpper(req.Role),
-	})
+	in := usecase.RegisterInput{
+		Email: req.Email, Password: req.Password, FullName: req.FullName,
+		Role: strings.ToUpper(req.Role),
+	}
+	if req.Store != nil {
+		in.Store = &domain.StoreProfile{Name: req.Store.Name, Address: req.Store.Address}
+		if req.Store.Location != nil {
+			in.Store.Lat, in.Store.Lon = req.Store.Location.Lat, req.Store.Location.Lon
+		}
+	}
+	u, err := h.uc.Register(r.Context(), in)
 	if err != nil {
 		mapAuthError(w, err)
 		return
@@ -182,6 +205,8 @@ func mapAuthError(w http.ResponseWriter, err error) {
 		httperr.Validation(w, "WEAK_PASSWORD", "la contraseña debe tener al menos 8 caracteres")
 	case errors.Is(err, domain.ErrInvalidRole):
 		httperr.Validation(w, "INVALID_ROLE", "rol no permitido para auto-registro")
+	case errors.Is(err, domain.ErrValidation):
+		httperr.Validation(w, "VALIDATION_ERROR", err.Error())
 	default:
 		httperr.Internal(w)
 	}

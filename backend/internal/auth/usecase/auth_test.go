@@ -17,6 +17,7 @@ type fakeUsers struct {
 	byEmail map[string]*domain.User
 	byID    map[string]*domain.User
 	created *domain.User
+	storeID string // tienda creada junto al registro STORE
 }
 
 // Create almacena una copia: el caso de uso limpia PasswordHash del objeto
@@ -28,6 +29,18 @@ func (f *fakeUsers) Create(_ context.Context, u *domain.User) error {
 	f.byEmail[cp.Email] = &cp
 	f.byID[cp.ID] = &cp
 	return nil
+}
+
+// CreateWithStore replica la semántica transaccional: usuario + tienda juntos.
+func (f *fakeUsers) CreateWithStore(ctx context.Context, u *domain.User, p *domain.StoreProfile) (string, error) {
+	if p == nil || !p.Valid() {
+		return "", domain.ErrValidation
+	}
+	if err := f.Create(ctx, u); err != nil {
+		return "", err
+	}
+	f.storeID = "store-" + u.ID
+	return f.storeID, nil
 }
 func (f *fakeUsers) FindByEmail(_ context.Context, email string) (*domain.User, error) {
 	u, ok := f.byEmail[email]
@@ -48,7 +61,7 @@ func (f *fakeUsers) FindByID(_ context.Context, id string) (*domain.User, error)
 
 // IdentityRepository: alcance de datos por rol (los fakes devuelven el alcance fijo).
 func (f *fakeUsers) FindStoreIDByOwner(_ context.Context, _ string) (string, error) {
-	return "store-1", nil
+	return f.storeID, nil
 }
 func (f *fakeUsers) FindDriverIdentity(_ context.Context, _ string) (string, string, error) {
 	return "driver-1", "vehicle-1", nil
@@ -115,7 +128,12 @@ type fakeHasher struct{}
 func (fakeHasher) Hash(plain string) (string, error) { return "hash:" + plain, nil }
 func (fakeHasher) Verify(hash, plain string) bool    { return hash == "hash:"+plain }
 
-// --- Tests -----------------------------------------------------------------
+// --- Tests ---
+
+// storeProfile devuelve un perfil de tienda válido para registros STORE.
+func storeProfile(name string) *domain.StoreProfile {
+	return &domain.StoreProfile{Name: name, Address: "Calle 1 # 2-3", Lat: 4.65, Lon: -74.05}
+}
 
 func setup(t *testing.T, allowOrder bool) (*AuthUseCase, *fakeRefresh, *fakeGuests) {
 	t.Helper()
@@ -146,12 +164,25 @@ func TestRegisterValidaEntrada(t *testing.T) {
 	}); !errors.Is(err, domain.ErrWeakPassword) {
 		t.Errorf("contraseña corta: err = %v", err)
 	}
+	// El rol STORE exige el perfil de tienda (sin ella no hay scope de datos).
+	if _, err := uc.Register(context.Background(), RegisterInput{
+		Email: "sintienda@b.co", Password: "12345678", Role: "STORE",
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Errorf("STORE sin perfil: err = %v, esperado ErrValidation", err)
+	}
+	// Coordenada inválida en el perfil de tienda (PostGIS, ADR-09).
+	if _, err := uc.Register(context.Background(), RegisterInput{
+		Email: "tiendanula@b.co", Password: "12345678", Role: "STORE",
+		Store: &domain.StoreProfile{Name: "Sin coords", Lat: 0, Lon: 0},
+	}); !errors.Is(err, domain.ErrValidation) {
+		t.Errorf("STORE coordenada nula: err = %v, esperado ErrValidation", err)
+	}
 }
 
 // Registro duplicado → 409 (ErrEmailAlreadyRegistered).
 func TestRegisterDuplicado(t *testing.T) {
 	uc, _, _ := setup(t, true)
-	in := RegisterInput{Email: "dup@b.co", Password: "12345678", Role: "STORE"}
+	in := RegisterInput{Email: "dup@b.co", Password: "12345678", Role: "STORE", Store: storeProfile("Dup")}
 	if _, err := uc.Register(context.Background(), in); err != nil {
 		t.Fatalf("primer registro: %v", err)
 	}
@@ -186,7 +217,7 @@ func TestLoginEmitePar(t *testing.T) {
 func TestLoginSinEnumerarUsuarios(t *testing.T) {
 	uc, _, _ := setup(t, true)
 	ctx := context.Background()
-	_, _ = uc.Register(ctx, RegisterInput{Email: "x@b.co", Password: "12345678", Role: "STORE"})
+	_, _ = uc.Register(ctx, RegisterInput{Email: "x@b.co", Password: "12345678", Role: "STORE", Store: storeProfile("Principal")})
 
 	_, errWrongPass := uc.Login(ctx, "x@b.co", "otra-clave")
 	_, errNoUser := uc.Login(ctx, "nadie@b.co", "12345678")
@@ -202,7 +233,7 @@ func TestLoginSinEnumerarUsuarios(t *testing.T) {
 func TestRefreshRotaElToken(t *testing.T) {
 	uc, refreshStore, _ := setup(t, true)
 	ctx := context.Background()
-	_, _ = uc.Register(ctx, RegisterInput{Email: "x@b.co", Password: "12345678", Role: "STORE"})
+	_, _ = uc.Register(ctx, RegisterInput{Email: "x@b.co", Password: "12345678", Role: "STORE", Store: storeProfile("Principal")})
 	pair, _ := uc.Login(ctx, "x@b.co", "12345678")
 
 	newPair, err := uc.Refresh(ctx, pair.RefreshToken)
@@ -226,7 +257,7 @@ func TestRefreshRotaElToken(t *testing.T) {
 func TestLogoutRevoca(t *testing.T) {
 	uc, _, _ := setup(t, true)
 	ctx := context.Background()
-	_, _ = uc.Register(ctx, RegisterInput{Email: "x@b.co", Password: "12345678", Role: "STORE"})
+	_, _ = uc.Register(ctx, RegisterInput{Email: "x@b.co", Password: "12345678", Role: "STORE", Store: storeProfile("Principal")})
 	pair, _ := uc.Login(ctx, "x@b.co", "12345678")
 
 	if err := uc.Logout(ctx, pair.RefreshToken); err != nil {

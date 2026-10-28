@@ -99,6 +99,17 @@ package "Esquema `app` (PostgreSQL + PostGIS)" #E8F0FE {
         * created_at : TIMESTAMPTZ
     }
 
+    entity "refresh_tokens" as refresh_tokens {
+        * id : UUID <<PK>>
+        --
+        * user_id : UUID <<FK>>
+        * token_hash : TEXT <<UNIQUE>>
+        * expires_at : TIMESTAMPTZ
+        * revoked : BOOLEAN
+        * replaced_by : UUID <<FK?>>
+        * created_at : TIMESTAMPTZ
+    }
+
     entity "sync_receipts" as sync_receipts {
         * id : UUID <<PK>>
         --
@@ -174,6 +185,7 @@ vehicles ||--o{ orders : "asignado a"
 drivers ||--o{ orders : "asignado a"
 orders ||--o{ order_events : "historial (append-only)"
 orders ||--o{ guest_tokens : "token de rastreo"
+users ||--o{ refresh_tokens : "sesión rotativa (hash)"
 orders ||--o{ points : "traza de la orden (nullable)"
 
 vehicles ||--o{ points : "emite telemetría"
