@@ -150,6 +150,80 @@ curl -s -X POST http://localhost:8080/api/v1/telemetry/bulk \
   `CB_TIMEOUT`): si la BD está degradada responden `503 CIRCUIT_OPEN` con
   `Retry-After`.
 
+### Ejemplo que funciona: traza de un vehículo (`track`)
+
+Copia y pega este bloque en la raíz del repo (stack levantado con `make up` y
+seed aplicado). Obtiene el token, el `VEHICLE_ID` de `ABC123` y las últimas 2
+horas de traza demo:
+
+```bash
+# 1) Token de proveedor.
+ACCESS_TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"proveedor@tiendas.dev","password":"Proveedor123"}' \
+  | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
+
+# 2) Un vehículo de su flota (ABC123 lo crea el seed).
+VEHICLE_ID=$(docker compose exec -T db psql -U tiendas -d tiendas -tAc \
+  "SELECT v.id FROM app.vehicles v JOIN app.users u ON u.id = v.provider_id
+   WHERE u.email='proveedor@tiendas.dev' AND v.plate='ABC123'")
+
+# 3) from/to son obligatorios en RFC3339 (aquí, las últimas 2 horas).
+FROM=$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)
+TO=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+
+curl -s "http://localhost:8080/api/v1/vehicles/$VEHICLE_ID/track?from=$FROM&to=$TO&limit=100" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+Respuesta `200` de la corrida de ejemplo (recortada a 2 de los 30 puntos; llegan
+**del más reciente al más antiguo**):
+
+```json
+{
+  "vehicle_id": "e1cf4001-75f0-45fa-94e4-484b2335213f",
+  "from": "2026-10-28T17:43:47Z",
+  "to": "2026-10-28T19:44:47Z",
+  "count": 30,
+  "points": [
+    {
+      "vehicle_id": "e1cf4001-75f0-45fa-94e4-484b2335213f",
+      "device_seq": 100,
+      "lat": 4.6483,
+      "lon": -74.072,
+      "speed_kph": 18,
+      "accuracy_m": 5.5,
+      "heading": 45,
+      "source": "DEVICE",
+      "time": "2026-10-28T19:15:00Z",
+      "received_at": "2026-10-28T19:15:13.742092Z"
+    },
+    {
+      "vehicle_id": "e1cf4001-75f0-45fa-94e4-484b2335213f",
+      "device_seq": 101,
+      "lat": 4.6485834870838945,
+      "lon": -74.07141912212128,
+      "speed_kph": 21.5,
+      "accuracy_m": 5.5,
+      "heading": 48,
+      "source": "DEVICE",
+      "time": "2026-10-28T19:14:00Z",
+      "received_at": "2026-10-28T19:15:13.742092Z"
+    }
+  ]
+}
+```
+
+- `count` es el número de puntos devueltos (`limit` 1000 por defecto, 5000
+  máximo) y coincide con `len(points)`.
+- En macOS reemplaza el cálculo de fechas por
+  `FROM=$(date -u -v-2H +%Y-%m-%dT%H:%M:%SZ)` y
+  `TO=$(date -u -v+1M +%Y-%m-%dT%H:%M:%SZ)`.
+- Si la ventana no tiene muestras → `404`; `from`/`to` mal formados, invertidos
+  o con rango > 7 días → `422`; vehículo de otra flota → `403`.
+- ¿Vacío porque el seed fue hace más de 2 h? Vuelve a ejecutar `make seed` para
+  refrescar la traza demo.
+
 ### WebSocket `/ws` (RF-04, ADR-03)
 
 ```bash
@@ -211,22 +285,10 @@ eventos de historial. Además carga una **traza demo de 30 puntos por vehículo*
 `track` y el WebSocket tengan datos que dibujar; si el vehículo ya tiene una
 traza reciente, no se duplica.
 
-```bash
-# Vehículo demo + traza de ejemplo (mismos datos que pinta el portal)
-VEHICLE_ID=$(docker compose exec -T db psql -U tiendas -d tiendas -tA -c \
-  "SELECT v.id FROM app.vehicles v JOIN app.users u ON u.id = v.provider_id
-   WHERE u.email = 'proveedor@tiendas.dev' ORDER BY v.plate LIMIT 1")
-FROM=$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)
-TO=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
-
-curl -s "http://localhost:8080/api/v1/vehicles/$VEHICLE_ID/track?from=$FROM&to=$TO&limit=100" \
-  -H "Authorization: Bearer $ACCESS_TOKEN"
-```
-
-Respuesta (recortada): `{"vehicle_id":"…","from":"…","to":"…","count":30,`
-`"points":[{"vehicle_id":"…","device_seq":100,"lat":4.6483,"lon":-74.0720,`
-`"speed_kph":18,"heading":45,"source":"DEVICE","time":"…","received_at":"…"}, …]}`.
-Los puntos se devuelven del más reciente al más antiguo.
+Los vehículos `ABC123`, `DEF456` y `GHI789` quedan con 30 muestras demo cada
+uno (más las que ya existieran), y `track` las devuelve de la más reciente a la
+más antigua. Para probarlo paso a paso (token, `VEHICLE_ID` y `from`/`to`) usa
+el **ejemplo que funciona** de la sección «Telemetría y tiempo real (F3)».
 
 ## Comandos
 
