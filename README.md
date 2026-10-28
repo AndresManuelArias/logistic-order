@@ -13,7 +13,7 @@ Módulo de logística, trazabilidad y telemetría en tiempo real multi-rol (Prov
 | Backend | Go 1.22 (monolito modular, Clean Architecture) |
 | Base de datos | PostgreSQL + TimescaleDB + PostGIS |
 | Portal web | Next.js 16 + React 19 (monorepo `web/`, F4) |
-| App móvil | React Native offline-first (F4, pendiente) |
+| App móvil | Expo SDK 54 + React Native 0.81 + WatermelonDB (offline-first, F4) |
 
 ## Requisitos
 
@@ -319,6 +319,41 @@ echo "http://localhost:3000/seguimiento/$ORDER_ID#t=$GUEST_TOKEN"
 El invitado solo puede `GET` esa orden y suscribirse a `order:{orderId}`; la
 lista de flota y cualquier otra orden responden `403`.
 
+## App móvil del conductor (F4)
+
+La app vive en [`mobile/`](mobile/README.md) y es **offline-first**:
+
+- Login de conductor, órdenes del día, detalle y prueba de entrega (POD local).
+- GPS en segundo plano (`expo-location` + `expo-task-manager`, foreground
+  service en Android) con política de 15 s / 25 m y filtro de precisión.
+- Persistencia en **WatermelonDB/SQLite**: los puntos se guardan **antes** de
+  cualquier intento de red.
+- Cola de lotes con `Idempotency-Key` write-ahead: un reintento o un reinicio
+  reutiliza la misma clave; `already_processed` cuenta como éxito.
+- Transiciones de estado offline con reconciliación por `GET` (el endpoint no
+  admite `Idempotency-Key`).
+- NetInfo + sincronización automática al reconectar, cada 30 s y tras cada
+  captura; contador «X puntos pendientes» y banner online/offline.
+- Tokens en SecureStore y refresh single-flight; datos locales aislados por
+  conductor (`owner_id`).
+
+```bash
+cd mobile
+npm install
+cp .env.example .env    # EXPO_PUBLIC_API_URL=http://10.0.2.2:8080 (Android)
+npm test                # 99 pruebas de dominio, cola, sync, sesión y POD
+npm run typecheck
+npx expo prebuild --clean && npm run android
+```
+
+Contrato canónico: los tipos se generan desde `backend/api/openapi.yaml`
+(`npm run gen:api`), sin DTOs manuales. El entorno actual **no tiene emulador ni
+Android SDK**, así que no se validó compilación nativa, GPS real ni permisos;
+sí se validaron el bundle de Metro (`expo export`) y la idempotencia contra el
+backend real (mismo lote con la misma clave → `already_processed: true`, sin
+puntos duplicados). Limitaciones y supuestos detallados en
+[`mobile/README.md`](mobile/README.md).
+
 ## Datos de demostración (seed)
 
 ```bash
@@ -365,6 +400,9 @@ make e2e-f2    # e2e F2 contra el stack local (72 casos)
 make e2e-f3    # e2e F3: telemetría, RBAC y WebSockets (60 casos)
 make test-web  # pruebas del portal + tracking-core + tracking-ui (58)
 make lint-web  # typecheck + lint + build de producción del portal
+make test-mobile # pruebas de la app móvil offline-first (99)
+make lint-mobile # typecheck de la app móvil
+make gen-mobile-api # regenera tipos OpenAPI de la app móvil
 make clean     # baja el stack y BORRA los volúmenes locales
 ```
 
@@ -466,6 +504,14 @@ web/                               # portal Next.js + librerías compartidas (F4
 ├── apps/portal/                   # rutas, BFF y paneles por rol
 ├── packages/tracking-core/        # cliente OpenAPI, WS y hook useTracking
 └── packages/tracking-ui/          # componentes y estilos compartidos
+mobile/                            # app del conductor offline-first (F4)
+├── App.tsx                        # arranque, providers y navegación raíz
+├── src/composition/               # composition root y tarea GPS headless
+├── src/domain/                    # reglas puras (puntos, órdenes, errores)
+├── src/ports/                     # interfaces sustituibles (red, cola, GPS…)
+├── src/application/               # casos de uso: sesión, sync, órdenes, POD
+├── src/infrastructure/            # WatermelonDB, HTTP, SecureStore, expo-location
+└── src/ui/                        # login, órdenes, detalle, componentes
 doc/                               # plan, arquitectura, modelo de datos
 ```
 
@@ -486,7 +532,7 @@ Las migraciones se aplican automáticamente al arrancar el backend (`MIGRATE_ON_
 | F1 — Esqueleto + Docker Compose | ✅ Completada (2026-10-28) |
 | F2 — Auth, RBAC y órdenes | ✅ Completada (2026-10-28) |
 | F3 — Telemetría y WebSockets | ✅ Completada (2026-10-28) |
-| F4 — Portal y app móvil | 🟨 **Portal completado (2026-10-28); app móvil pendiente** |
+| F4 — Portal y app móvil | ✅ Implementados (2026-10-28); validación en dispositivo pendiente (sin emulador/SDK) |
 | F5 — Agente IA | ⬜ Pendiente |
 | F6 — Carga, IaC y CI/CD | ⬜ Pendiente |
 

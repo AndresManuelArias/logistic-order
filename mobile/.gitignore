@@ -1,0 +1,23 @@
+# Dependencias y artefactos de Expo
+node_modules/
+.expo/
+dist/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Proyectos nativos generados por `expo prebuild`
+android/
+ios/
+
+# Entorno local (nunca commitear)
+.env
+.env.local
+
+# Sistema
+.DS_Store
+*.log

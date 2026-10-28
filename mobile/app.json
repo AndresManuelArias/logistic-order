@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Tiendas-Track Conductor",
+    "slug": "tiendas-track-driver",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "scheme": "tiendastrack",
+    "backgroundColor": "#0b1220",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "dev.tiendas.track.driver",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Tiendas-Track usa tu ubicación para reportar el avance de tus entregas.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Con la ubicación en segundo plano la ruta se sigue registrando aunque cierres la app; puedes desactivarlo cuando quieras.",
+        "NSCameraUsageDescription": "La cámara se usa para adjuntar la foto de la prueba de entrega.",
+        "NSPhotoLibraryUsageDescription": "Puedes adjuntar una foto existente como prueba de entrega."
+      }
+    },
+    "android": {
+      "package": "dev.tiendas.track.driver",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "CAMERA"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Tiendas-Track usa tu ubicación para reportar el avance de tus entregas.",
+          "locationAlwaysAndWhenInUsePermission": "Con la ubicación en segundo plano la ruta se sigue registrando aunque cierres la app.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Puedes adjuntar una foto existente como prueba de entrega.",
+          "cameraPermission": "La cámara se usa para adjuntar la foto de la prueba de entrega."
+        }
+      ],
+      "expo-secure-store"
+    ]
+  }
+}
