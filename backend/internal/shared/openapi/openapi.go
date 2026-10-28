@@ -109,11 +109,18 @@ const uiHTML = `<!doctype html>
   pre { background:#8881; padding:8px; border-radius:6px; overflow-x:auto; }
   .badge { display:inline-block; font:700 11px/1.6 ui-monospace,monospace; padding:0 8px;
            border-radius:10px; color:#fff; margin-right:6px; }
+  .auth { border-top:1px solid #8883; margin-top:12px; padding-top:12px; }
+  .auth input, .param-input, textarea { width:100%; padding:7px; border-radius:5px; border:1px solid #8886; font:12px/1.4 ui-monospace,monospace; }
+  textarea { min-height:120px; resize:vertical; }
+  .try-btn { border:0; border-radius:5px; padding:7px 12px; background:#2563eb; color:white; cursor:pointer; font-weight:600; }
+  .try-btn:disabled { opacity:.6; cursor:wait; }
+  .result { margin-top:10px; }
   @media (max-width:760px){ nav{width:100%;border-right:none} body{flex-direction:column} }
 </style>
 </head>
 <body>
 <nav><h1>Tiendas-Track API<br><small style="font-weight:400;opacity:.7">OpenAPI 3.1 — contrato canónico (ADR-10)</small></h1><div id="index"></div>
+<div class="auth"><strong>Autorización</strong><br><label style="font-size:12px">Token Bearer</label><input id="bearer-token" autocomplete="off" placeholder="pega aquí el access_token"><button class="try-btn" id="save-token" style="margin-top:6px">Guardar token</button></div>
 <p style="font-size:12px;opacity:.6">Spec: <a href="/api/v1/openapi.yaml">yaml</a> · <a href="/api/v1/openapi.json">json</a></p></nav>
 <main id="detail">Cargando especificación…</main>
 <script>
@@ -143,22 +150,22 @@ fetch('/swagger/openapi.json').then(r=>r.json()).then(spec=>{
 
     const params=(op.parameters||[]).concat((spec.paths[it.p].parameters||[]));
     if(params.length){
-      html+='<div class="params"><table><tr><th>Parámetro</th><th>En</th><th>Tipo</th><th>Requerido</th><th>Descripción</th></tr>';
+      html+='<div class="params"><table><tr><th>Parámetro</th><th>En</th><th>Tipo</th><th>Requerido</th><th>Valor</th></tr>';
       params.forEach(p=>{
         const ref=p.$ref?refName(p.$ref):null;
         const q=ref?((spec.components.parameters||{})[ref]||{}):p;
         const sch=q.schema||{};
-        html+='<tr><td><code>'+(q.name||ref||'')+'</code></td><td>'+q.in+'</td><td>'+
+        html+='<tr><td><code>'+esc(q.name||ref||'')+'</code></td><td>'+esc(q.in||'')+'</td><td>'+ 
           (sch.type||(sch.$ref?refName(sch.$ref):'')||'')+(sch.enum?' ['+sch.enum.join(' | ')+']':'')+
-          '</td><td>'+(q.required?'sí':'no')+'</td><td>'+(q.description||'')+'</td></tr>';
+          '</td><td>'+ (q.required?'sí':'no')+'</td><td><input class="param-input" data-param-name="'+esc(q.name||ref||'')+'" data-param-in="'+esc(q.in||'')+'"'+(q.required?' required':'')+'></td></tr>';
       });
       html+='</table></div>';
     }
     if(op.requestBody){
       const media=op.requestBody.content&&op.requestBody.content['application/json'];
       if(media){
-        html+='<div class="resp"><strong>Body</strong> '+(op.requestBody.required?'(requerido)':'')+'<pre>'+
-          esc(JSON.stringify(schemaExample(media.schema,spec),null,2))+'</pre></div>';
+        html+='<div class="resp"><strong>Body JSON</strong> '+(op.requestBody.required?'(requerido)':'')+'<textarea id="body-'+i+'">'+
+          esc(JSON.stringify(schemaExample(media.schema,spec),null,2))+'</textarea></div>';
       }
     }
     if(op.responses){
@@ -170,9 +177,50 @@ fetch('/swagger/openapi.json').then(r=>r.json()).then(spec=>{
       }
       html+='</table></div>';
     }
+    html+='<div class="resp"><button class="try-btn execute-btn" data-op="'+i+'">Try it out</button><div id="result-'+i+'" class="result"></div></div>';
     s.innerHTML=html;
     det.appendChild(s);
   });
+
+  document.getElementById('save-token').addEventListener('click',()=>{
+    localStorage.setItem('tiendas_bearer_token',document.getElementById('bearer-token').value.trim());
+  });
+  document.getElementById('bearer-token').value=localStorage.getItem('tiendas_bearer_token')||'';
+  document.querySelectorAll('.execute-btn').forEach(button=>button.addEventListener('click',()=>executeOperation(button.dataset.op,spec)));
+
+  async function executeOperation(index,spec){
+    const operation=ops[Number(index)], section=document.getElementById('op'+index);
+    let path=operation.p;
+    const query=new URLSearchParams(), headers={};
+    section.querySelectorAll('.param-input').forEach(input=>{
+      const value=input.value.trim();
+      if(!value) return;
+      if(input.dataset.paramIn==='path') path=path.replace('{'+input.dataset.paramName+'}',encodeURIComponent(value));
+      else if(input.dataset.paramIn==='query') query.set(input.dataset.paramName,value);
+      else if(input.dataset.paramIn==='header') headers[input.dataset.paramName]=value;
+    });
+    const missing=[...section.querySelectorAll('.param-input[required]')].filter(input=>!input.value.trim()).map(input=>input.dataset.paramName);
+    if(missing.length){ showResult(index,'Faltan parámetros requeridos: '+missing.join(', ')); return; }
+    const qs=query.toString();
+    const options={method:operation.m.toUpperCase(),headers};
+    const token=document.getElementById('bearer-token').value.trim();
+    if(token) headers.Authorization='Bearer '+token.replace(/^Bearer\s+/i,'');
+    const body=document.getElementById('body-'+index);
+    if(body){
+      try{ JSON.parse(body.value); }catch(e){ showResult(index,'JSON inválido: '+e.message); return; }
+      headers['Content-Type']='application/json'; options.body=body.value;
+    }
+    const result=document.getElementById('result-'+index); result.innerHTML='Ejecutando…';
+    try{
+      const response=await fetch(path+(qs?'?'+qs:''),options);
+      const text=await response.text();
+      showResult(index,response.status+' '+response.statusText+'\n\n'+text);
+    }catch(e){ showResult(index,'Error de conexión: '+e.message); }
+  }
+
+  function showResult(index,text){
+    document.getElementById('result-'+index).innerHTML='<strong>Response</strong><pre>'+esc(text)+'</pre>';
+  }
 
   function refName(ref){ return ref.split('/').pop(); }
   function esc(s){ return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
