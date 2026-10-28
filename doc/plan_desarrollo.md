@@ -259,10 +259,22 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 
 ## 7. Plan de Implementación por Fases
 
+### Estado de ejecución
+
+| Fase | Estado | Evidencia |
+|---|---|---|
+| **F1** | ✅ **Completada (2026-10-28)** | `docker compose up` OK; `/healthz` y `/readyz` 200; 4 migraciones aplicadas; hypertable + continuous aggregate + retención verificadas |
+| F2 | ⬜ Pendiente | — |
+| F3 | ⬜ Pendiente | — |
+| F4 | ⬜ Pendiente | — |
+| F5 | ⬜ Pendiente | — |
+| F6 | ⬜ Pendiente | — |
+
 > **Orden estricto:** una fase no arranca hasta que sus dependencias estén entregadas. Cada tarea indica el **agente responsable** (definidos en `.opencode/agents/`). El frontend y el móvil pueden **iniciar en paralelo** contra contratos mock (OpenAPI de F2).
 
-### F1 — Preparación y esqueleto
+### F1 — Preparación y esqueleto ✅ COMPLETADA (2026-10-28)
 - **Objetivo:** entorno ejecutable de punta a punta con `docker compose up`.
+- **Resultado:** ✅ `docker compose up -d --build` levanta db (TimescaleDB+PostGIS), backend y web; `/healthz` y `/readyz` responden 200; 4 migraciones aplicadas; `telemetry.points` hypertable, `telemetry.stops` continuous aggregate, retención 90 días y vista `stop_intervals` verificadas. Pruebas de idempotencia, append-only y PostGIS ejecutadas con éxito.
 - **Agentes:** `devops` (principal), `backend-go` (apoyo).
 - **Tareas:**
   1. Estructura del monolito Go (§4.1) + `go.mod` + logger + config por env.

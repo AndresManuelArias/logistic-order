@@ -146,31 +146,53 @@ El sistema **sí detecta las paradas comparando coordenadas en el tiempo** (RF-0
 2. **Duración:** el intervalo debe ser ≥ N minutos (ej. 20 min para RF-10).
 3. **Huecos de señal:** un vacío de puntos mayor a X minutos (dispositivo apagado / sin cobertura) **corta** la parada; no se cuenta como tiempo detenido.
 
-**Definición (esquema `telemetry`):**
+**Definición implementada (esquema `telemetry`, migración `0004_telemetry.sql`):**
+
+El continuous aggregate trabaja a **nivel de bucket** (TimescaleDB no admite funciones de ventana en la vista); los intervalos se derivan de una vista normal:
 
 ```sql
--- Continuous aggregate: bucket de 1 min con posición y estado de movimiento
+-- Bucket de 1 min con estado de movimiento (derivado de los puntos)
 CREATE MATERIALIZED VIEW telemetry.stops
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 minute', time) AS bucket_start,
     vehicle_id,
-    location,
-    order_id,
-    ST_DWithin(location, LAG(location) OVER (PARTITION BY vehicle_id ORDER BY time), 30) AS is_moving
+    first(location, time)  AS location,
+    first(order_id, time)  AS order_id,
+    avg(speed_kph)         AS avg_speed_kph,
+    (avg(speed_kph) < 2.0) AS is_stopped,   -- NULL si no hay velocidad
+    count(*)               AS sample_count
 FROM telemetry.points
-GROUP BY bucket_start, vehicle_id, location, order_id;
+GROUP BY bucket_start, vehicle_id
+WITH NO DATA;
 
--- Política de refresco automático
 SELECT add_continuous_aggregate_policy('telemetry.stops',
     start_offset => INTERVAL '3 hours',
     end_offset   => INTERVAL '1 minute',
     schedule_interval => INTERVAL '1 minute');
+
+-- Intervalos de parada reales: agrupa buckets consecutivos detenidos
+CREATE VIEW telemetry.stop_intervals AS
+WITH s AS (
+    SELECT vehicle_id, bucket_start, location, order_id, is_stopped,
+           SUM(CASE WHEN is_stopped THEN 0 ELSE 1 END)
+               OVER (PARTITION BY vehicle_id ORDER BY bucket_start) AS seg
+    FROM telemetry.stops
+),
+g AS (
+    SELECT vehicle_id, seg,
+           MIN(bucket_start) AS stop_start, MAX(bucket_start) AS stop_end,
+           first(location, bucket_start) AS location,
+           first(order_id, bucket_start) AS order_id
+    FROM s WHERE is_stopped GROUP BY vehicle_id, seg
+)
+SELECT vehicle_id, stop_start, stop_end + INTERVAL '1 minute' AS stop_end,
+       (EXTRACT(EPOCH FROM (stop_end + INTERVAL '1 minute' - stop_start)))::INTEGER AS duration_seconds,
+       location, order_id
+FROM g;
 ```
 
-> Los intervalos de parada (inicio, fin, duración, índice de parada) se derivan de agrupar los buckets consecutivos con `is_moving = false`; el agente IA los lee con `get_stopped_vehicles(minutes, area)`.
-
----
+> **Validado en F1:** insertando 3 puntos de un vehículo detenido, el aggregate marcó `is_stopped = true` y `stop_intervals` devolvió una parada de **1200 s**.
 
 ## 4. Migraciones y extensión
 

@@ -139,17 +139,25 @@ package "Esquema `telemetry` (TimescaleDB + PostGIS)" #FFE8E8 {
         received_at : TIMESTAMPTZ
     }
 
-    entity "telemetry.stops\n(CONTINUOUS AGGREGATE · refresco 1 min)" as stops {
-        bucket_start : TIMESTAMPTZ <<PK>>
+    entity "telemetry.stops\n(CONTINUOUS AGGREGATE · bucket 1 min)" as stops {
+        * bucket_start : TIMESTAMPTZ <<PK>>
         * vehicle_id : UUID <<PK>>
-        * stop_index : INTEGER <<PK>>
         --
         order_id : UUID <<FK?>>
-        stop_start : TIMESTAMPTZ
+        location : geometry(Point,4326) <<POSTGIS>>
+        avg_speed_kph : DOUBLE PRECISION
+        is_stopped : BOOLEAN
+        sample_count : BIGINT
+    }
+
+    entity "telemetry.stop_intervals\n(VISTA sobre el aggregate)" as stop_intervals {
+        * vehicle_id : UUID
+        * stop_start : TIMESTAMPTZ
+        --
         stop_end : TIMESTAMPTZ
         duration_seconds : INTEGER
         location : geometry(Point,4326) <<POSTGIS>>
-        is_moving : BOOLEAN
+        order_id : UUID <<FK?>>
     }
 }
 
@@ -169,7 +177,8 @@ orders ||--o{ guest_tokens : "token de rastreo"
 orders ||--o{ points : "traza de la orden (nullable)"
 
 vehicles ||--o{ points : "emite telemetría"
-stops }o--|| points : "agrega paradas"
+stops }o--|| points : "deriva de puntos (CA)"
+stop_intervals ||--o{ stops : "agrupa buckets consecutivos"
 
 ' ============ INDICES ESPACIALES (nota) ============
 

@@ -24,3 +24,6 @@ build/
 *.log
 .idea/
 .vscode/
+
+.diag
+*.txt
