@@ -165,10 +165,42 @@ docker compose exec db psql -U ${POSTGRES_USER:-tiendas} -d ${POSTGRES_DB:-tiend
 # Lista las tablas si la BD está lista
 ```
 
-> La base de datos expone el puerto 5432 por defecto. Conéctate con:
+> Conéctate a PostgreSQL directamente dentro del contenedor Docker. El nombre
+> generado por Compose es `tiendas-track-db-1`, según el proyecto definido en
+> `docker-compose.yml`:
+>
 > ```bash
-> psql "postgres://tiendas:tiendas_dev@localhost:5432/tiendas?sslmode=disable"
+> docker exec -it tiendas-track-db-1 psql -U tiendas -d tiendas
 > ```
+>
+> Dentro de `psql`, lista los esquemas y las tablas de la aplicación:
+>
+> ```sql
+> \dn                 -- esquemas disponibles
+> \dt app.*           -- tablas de la aplicación
+> \dt telemetry.*     -- tablas de telemetría
+> \dt *.*             -- todas las tablas visibles
+> \q                  -- salir
+> ```
+>
+> Para ejecutar una consulta y salir inmediatamente, utiliza `-c`:
+>
+> ```bash
+> docker exec -i tiendas-track-db-1 \
+>   psql -U tiendas -d tiendas -c "\dt app.*"
+> ```
+>
+> Como alternativa, Compose encuentra el contenedor sin usar su nombre generado:
+>
+> ```bash
+> docker compose exec db psql -U tiendas -d tiendas
+> ```
+>
+> Si cambiaste las credenciales de `.env`, reemplaza `tiendas` por los valores
+> de `POSTGRES_USER` y `POSTGRES_DB` correspondientes.
+>
+> La aplicación usa los esquemas `app` y `telemetry`; `psql -c "\dt"` solo
+> muestra las tablas de `public`, por lo que puede parecer que la base está vacía.
 
 Pruebas end-to-end de F2 (requiere el stack levantado):
 
