@@ -1,0 +1,691 @@
+/* Estilos del portal. Los tokens y los componentes de presentación viven en
+   @tiendas/tracking-ui; aquí solo va la composición de páginas y formularios. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--tt-bg);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--tt-bg);
+  color: var(--tt-text);
+  font-family: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--tt-primary);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+}
+
+.tt-skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  background: #fff;
+  color: var(--tt-primary);
+  border-radius: 0 0 var(--tt-radius-sm) 0;
+}
+
+.tt-skip:focus {
+  left: 0;
+}
+
+/* --- Estructura ----------------------------------------------------------- */
+
+.tt-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.tt-app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  padding: 0.75rem clamp(1rem, 4vw, 2.5rem);
+  background: #0b1f3a;
+  color: #e8eefc;
+  box-shadow: 0 8px 24px -18px rgb(2 6 23 / 80%);
+}
+
+.tt-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.tt-brand__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9px;
+  background: linear-gradient(140deg, #3b82f6, #1d4ed8);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.tt-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-inline: auto;
+}
+
+.tt-nav__link {
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  color: #c3d3ee;
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.tt-nav__link:hover {
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
+}
+
+.tt-nav__link[aria-current='page'] {
+  background: rgb(255 255 255 / 14%);
+  color: #fff;
+}
+
+.tt-app-header .tt-button {
+  min-height: 2.1rem;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+.tt-app-header .tt-button--ghost {
+  border-color: rgb(255 255 255 / 30%);
+  color: #e8eefc;
+}
+
+.tt-app-header .tt-button--ghost:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.tt-user {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.tt-user__name {
+  font-size: 0.85rem;
+  color: #d8e4fb;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: clamp(1.25rem, 3vw, 2.25rem) clamp(1rem, 4vw, 2.5rem);
+}
+
+.tt-footer {
+  padding: 1.25rem clamp(1rem, 4vw, 2.5rem);
+  border-top: 1px solid var(--tt-border);
+  color: var(--tt-muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+/* --- Páginas -------------------------------------------------------------- */
+
+.tt-page {
+  display: grid;
+  gap: clamp(1rem, 2.5vw, 1.75rem);
+}
+
+.tt-page__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tt-page__title {
+  margin: 0;
+  font-size: clamp(1.55rem, 3vw, 2.1rem);
+}
+
+.tt-page__subtitle {
+  margin: 0.35rem 0 0;
+  color: var(--tt-muted);
+  max-width: 70ch;
+}
+
+.tt-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.tt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.9rem;
+}
+
+.tt-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(260px, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .tt-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tt-card {
+  display: grid;
+  gap: 0.9rem;
+  padding: clamp(1rem, 2vw, 1.35rem);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius);
+  background: var(--tt-surface);
+  box-shadow: var(--tt-shadow);
+}
+
+.tt-card--flat {
+  box-shadow: none;
+}
+
+.tt-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.tt-section__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.tt-section__hint {
+  margin: 0;
+  color: var(--tt-muted);
+  font-size: 0.82rem;
+}
+
+.tt-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tt-muted {
+  color: var(--tt-muted);
+}
+
+.tt-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* --- Formularios ---------------------------------------------------------- */
+
+.tt-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.tt-field {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.tt-field__label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--tt-text);
+}
+
+.tt-input,
+.tt-select,
+.tt-textarea {
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-sm);
+  background: #fff;
+  color: var(--tt-text);
+  font: inherit;
+  font-size: 0.92rem;
+}
+
+.tt-input:focus-visible,
+.tt-select:focus-visible,
+.tt-textarea:focus-visible {
+  outline: 3px solid #93b4ff;
+  outline-offset: 1px;
+  border-color: var(--tt-primary);
+}
+
+.tt-input[aria-invalid='true'] {
+  border-color: var(--tt-danger);
+}
+
+.tt-field__hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--tt-muted);
+}
+
+.tt-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.tt-form__error {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #f5c6c2;
+  border-radius: var(--tt-radius-sm);
+  background: var(--tt-danger-soft);
+  color: var(--tt-danger);
+  font-size: 0.86rem;
+}
+
+.tt-form__notice {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #b7e4cb;
+  border-radius: var(--tt-radius-sm);
+  background: var(--tt-live-soft);
+  color: var(--tt-live);
+  font-size: 0.86rem;
+}
+
+.tt-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+/* --- Tabla de flota ------------------------------------------------------- */
+
+.tt-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius);
+  background: var(--tt-surface);
+}
+
+.tt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.tt-table th,
+.tt-table td {
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid var(--tt-border);
+  white-space: nowrap;
+}
+
+.tt-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tt-muted);
+  background: var(--tt-surface-2);
+}
+
+.tt-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tt-table tr.is-selected td {
+  background: var(--tt-primary-soft);
+}
+
+.tt-table__action {
+  border: 0;
+  background: transparent;
+  color: var(--tt-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+/* --- Login y portada ------------------------------------------------------ */
+
+.tt-auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: clamp(1rem, 4vw, 3rem);
+  background:
+    radial-gradient(1000px 500px at 15% -10%, #dbe7ff 0%, transparent 60%),
+    radial-gradient(800px 420px at 110% 10%, #e6f6ee 0%, transparent 55%),
+    var(--tt-bg);
+}
+
+.tt-auth__card {
+  width: min(430px, 100%);
+  display: grid;
+  gap: 1.1rem;
+  padding: clamp(1.5rem, 4vw, 2.25rem);
+  border: 1px solid var(--tt-border);
+  border-radius: 20px;
+  background: var(--tt-surface);
+  box-shadow: 0 24px 60px -32px rgb(16 24 40 / 45%);
+}
+
+.tt-auth__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  color: var(--tt-text);
+  text-decoration: none;
+}
+
+.tt-auth__title {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.tt-auth__subtitle {
+  margin: 0;
+  color: var(--tt-muted);
+  font-size: 0.9rem;
+}
+
+.tt-auth__foot {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--tt-muted);
+  text-align: center;
+}
+
+.tt-landing {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background:
+    radial-gradient(1100px 520px at 10% -10%, #dbe7ff 0%, transparent 60%),
+    radial-gradient(900px 480px at 105% 5%, #e6f6ee 0%, transparent 55%),
+    var(--tt-bg);
+}
+
+.tt-landing__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem clamp(1rem, 5vw, 3rem);
+}
+
+.tt-landing__main {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+  padding: clamp(1.5rem, 5vw, 4rem) clamp(1rem, 5vw, 3rem);
+  display: grid;
+  gap: 1.5rem;
+  align-content: center;
+}
+
+.tt-landing__header .tt-brand {
+  color: var(--tt-text);
+}
+
+.tt-landing__title {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  letter-spacing: -0.02em;
+}
+
+.tt-landing__lead {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--tt-muted);
+  font-size: clamp(1rem, 1.4vw, 1.15rem);
+}
+
+.tt-role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.9rem;
+}
+
+.tt-role-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1.1rem;
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius);
+  background: rgb(255 255 255 / 80%);
+  backdrop-filter: blur(2px);
+}
+
+.tt-role-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.tt-role-card p {
+  margin: 0;
+  color: var(--tt-muted);
+  font-size: 0.88rem;
+}
+
+.tt-landing__foot {
+  padding: 1.25rem clamp(1rem, 5vw, 3rem);
+  color: var(--tt-muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+/* --- Compartir seguimiento ----------------------------------------------- */
+
+.tt-share {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.tt-share__row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.tt-share__input {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.tt-share__note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--tt-muted);
+}
+
+/* --- Asistente ------------------------------------------------------------ */
+
+.tt-ai {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.tt-ai__messages {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tt-ai__message {
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--tt-radius-sm);
+  font-size: 0.9rem;
+  background: var(--tt-surface-2);
+  max-width: 88%;
+}
+
+.tt-ai__message--user {
+  justify-self: end;
+  background: var(--tt-primary-soft);
+}
+
+.tt-ai__message p {
+  margin: 0;
+}
+
+.tt-ai__empty {
+  margin: 0;
+  color: var(--tt-muted);
+  font-size: 0.85rem;
+}
+
+/* --- Vista de invitado ---------------------------------------------------- */
+
+.tt-guest {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--tt-bg);
+}
+
+.tt-guest__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem clamp(1rem, 4vw, 2.5rem);
+  background: #0b1f3a;
+  color: #e8eefc;
+}
+
+.tt-guest__main {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  padding: clamp(1.25rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2.5rem);
+  display: grid;
+  gap: 1.25rem;
+  align-content: start;
+}
+
+.tt-guest__title {
+  margin: 0;
+  font-size: clamp(1.4rem, 3.5vw, 2rem);
+}
+
+.tt-guest__foot {
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--tt-muted);
+}
+
+/* --- Detalle de vehículo -------------------------------------------------- */
+
+.tt-detail {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.tt-detail__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.86rem;
+}
+
+.tt-detail__row dt {
+  color: var(--tt-muted);
+}
+
+.tt-detail__row dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.tt-detail__title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .tt-nav {
+    order: 3;
+    width: 100%;
+    margin-inline: 0;
+  }
+
+  .tt-user__name {
+    display: none;
+  }
+
+  .tt-page__head {
+    align-items: flex-start;
+  }
+}

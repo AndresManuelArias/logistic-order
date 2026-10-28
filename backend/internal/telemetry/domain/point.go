@@ -100,13 +100,16 @@ func (r BulkResult) Duplicates(batch int) int {
 }
 
 // PointEvent es el hecho de dominio publicado al bus interno y entregado por
-// WebSocket. Es intencionadamente plano y estable: es parte del contrato WS.
+// WebSocket. Es intencionadamente plano y estable: es parte del contrato WS y
+// debe cumplir el schema TelemetryPoint de OpenAPI (incluye device_seq).
 type PointEvent struct {
 	VehicleID  string   `json:"vehicle_id"`
 	OrderID    string   `json:"order_id,omitempty"`
+	DeviceSeq  int64    `json:"device_seq"`
 	Lat        float64  `json:"lat"`
 	Lon        float64  `json:"lon"`
 	SpeedKPH   *float64 `json:"speed_kph,omitempty"`
+	AccuracyM  *float64 `json:"accuracy_m,omitempty"`
 	Heading    *float64 `json:"heading,omitempty"`
 	Time       string   `json:"time"`
 	ReceivedAt string   `json:"received_at"`

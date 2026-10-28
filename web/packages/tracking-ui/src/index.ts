@@ -1,0 +1,14 @@
+// Superficie pública de @tiendas/tracking-ui: componentes presentacionales y
+// utilidades de formato. Sin acceso a red ni estado de sesión.
+export * from './components/status-badge'
+export * from './components/connection-pill'
+export * from './components/kpi-card'
+export * from './components/order-card'
+export * from './components/order-progress'
+export * from './components/tracking-map'
+export * from './components/empty-state'
+export * from './components/error-panel'
+export * from './components/loading-panel'
+export * from './components/segmented-tabs'
+export * from './lib/geometry'
+export * from './lib/format'

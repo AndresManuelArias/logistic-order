@@ -40,6 +40,8 @@ tags:
     description: Alta y consulta de la tienda del tendero (RF-02), como paso propio del registro.
   - name: Telemetry
     description: Ingesta GPS (RF-03), Bulk Sync idempotente (RF-09) y consultas de traza con RBAC.
+  - name: Vehicles
+    description: Flota visible para el rol autenticado, con la última posición conocida (RF-02).
   - name: Realtime
     description: Canal WebSocket `/ws` para posición en tiempo real filtrada por rol (RF-04, ADR-03).
   - name: Ops
@@ -735,6 +737,72 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/vehicles:
+    get:
+      tags: [Vehicles]
+      operationId: listVehicles
+      summary: Vehículos visibles para el rol autenticado
+      description: |
+        El alcance se aplica en el servidor (RF-02):
+
+        - `PROVIDER`: toda su flota.
+        - `STORE`: vehículos con al menos una orden de su tienda (vista dual).
+        - `DRIVER`: su vehículo asignado.
+        - Invitado (`scope: order:<id>`): `403`.
+
+        Cada vehículo incluye `last_position` con la última muestra GPS
+        conocida (`null` si aún no reporta). Orden estable por placa.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+            minimum: 0
+            maximum: 200
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        "200":
+          description: Página de vehículos del alcance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VehicleListResponse"
+              example:
+                items:
+                  - id: "e1cf4001-75f0-45fa-94e4-484b2335213f"
+                    plate: "ABC123"
+                    status: "ACTIVE"
+                    last_position:
+                      vehicle_id: "e1cf4001-75f0-45fa-94e4-484b2335213f"
+                      device_seq: 100
+                      lat: 4.6483
+                      lon: -74.072
+                      speed_kph: 18
+                      accuracy_m: 5.5
+                      heading: 45
+                      source: "DEVICE"
+                      time: "2026-10-28T19:15:00Z"
+                      received_at: "2026-10-28T19:15:13.742092Z"
+                total: 1
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /api/v1/vehicles/{id}/latest:
     get:
       tags: [Telemetry]
@@ -1151,7 +1219,6 @@ components:
       type: string
       enum: [DEVICE, BULK_SYNC]
       description: Origen de la muestra (ingesta individual o sincronización en bloque).
-
     TelemetryPointInput:
       type: object
       required: [time, lat, lon]
@@ -1235,6 +1302,40 @@ components:
           type: string
           format: date-time
           description: Momento en que el servidor recibió la muestra.
+
+    Vehicle:
+      type: object
+      required: [id, plate, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        plate:
+          type: string
+          maxLength: 10
+        status:
+          $ref: "#/components/schemas/VehicleStatus"
+        last_position:
+          description: Última muestra GPS conocida (`null` si aún no reporta).
+          oneOf:
+            - $ref: "#/components/schemas/TelemetryPoint"
+            - type: "null"
+
+    VehicleStatus:
+      type: string
+      enum: [ACTIVE, INACTIVE]
+
+    VehicleListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Vehicle"
+        total:
+          type: integer
+          description: Total de vehículos del alcance antes de paginar.
 
     IngestResponse:
       type: object

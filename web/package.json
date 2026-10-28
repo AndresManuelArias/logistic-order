@@ -1,0 +1,36 @@
+{
+  "name": "tiendas-track-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Monorepo del portal web multi-rol de Tiendas-Track (F4)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @tiendas/portal",
+    "build": "npm run build -w @tiendas/portal",
+    "start": "npm run start -w @tiendas/portal",
+    "lint": "npm run lint -w @tiendas/portal",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "gen:api": "openapi-typescript ../backend/api/openapi.yaml -o packages/tracking-core/src/api/generated/openapi.ts",
+    "check:api": "npm run gen:api && git diff --exit-code -- packages/tracking-core/src/api/generated/openapi.ts"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "eslint": "^9.39.1",
+    "jsdom": "^30.1.3",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

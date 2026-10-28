@@ -69,12 +69,20 @@ services:
     restart: "no"
 
   web:
-    # Placeholder estático hasta F4 (portal Next.js multi-rol).
-    build: ./web
+    # Portal Next.js multi-rol (F4). El navegador habla con el BFF same-origin
+    # /api/backend/* y con el WebSocket público del backend.
+    build:
+      context: ./web
+      args:
+        # Se incrusta en el bundle: debe ser una URL alcanzable por el navegador.
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8080/ws}
     depends_on:
       - backend
+    environment:
+      # Red interna de Compose: el servidor de Next llama a Go por aquí.
+      BACKEND_URL: http://backend:8080
     ports:
-      - "${WEB_PORT:-3000}:8080"
+      - "${WEB_PORT:-3000}:3000"
     restart: unless-stopped
 
 volumes:

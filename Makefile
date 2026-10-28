@@ -2,7 +2,7 @@
 COMPOSE ?= docker compose
 BACKEND_DIR := backend
 
-.PHONY: dev up db-up run-local down restart logs ps health seed test build vet fmt tidy psql e2e-f2 e2e-f3 clean help
+.PHONY: dev up db-up run-local down restart logs ps health seed test build vet fmt tidy psql e2e-f2 e2e-f3 test-web lint-web clean help
 
 help: ## Lista de comandos
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -66,6 +66,12 @@ e2e-f2: ## E2E F2 contra el stack local (72 casos)
 
 e2e-f3: ## E2E F3: telemetría, RBAC y WebSockets (60 casos)
 	bash scripts/e2e_f3.sh
+
+test-web: ## Pruebas del portal y librerías compartidas (F4)
+	cd web && npm test
+
+lint-web: ## Typecheck + lint + build del portal (F4)
+	cd web && npm run typecheck && npm run lint && npm run build
 
 clean: ## Detiene el stack y borra volúmenes (¡borra datos locales!)
 	$(COMPOSE) down -v

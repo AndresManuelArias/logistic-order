@@ -58,6 +58,7 @@ func TestSpecCubreEndpointsF2(t *testing.T) {
 		{"/api/v1/stores/me", "get"},
 		{"/api/v1/telemetry/points", "post"},
 		{"/api/v1/telemetry/bulk", "post"},
+		{"/api/v1/vehicles", "get"},
 		{"/api/v1/vehicles/{id}/latest", "get"},
 		{"/api/v1/vehicles/{id}/track", "get"},
 		{"/ws", "get"},

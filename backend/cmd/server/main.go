@@ -95,6 +95,7 @@ func run() error {
 	storeRepo := storespostgres.NewStoreRepository(pool)
 	pointRepo := telemetrypostgres.NewPointRepository(pool)
 	scopeRepo := telemetrypostgres.NewScopeRepository(pool)
+	fleetRepo := telemetrypostgres.NewFleetRepository(pool)
 
 	// Casos de uso.
 	ordersUC := ordersusecase.New(ordersRepo, log)
@@ -112,6 +113,7 @@ func run() error {
 		Timeout:          cfg.CBTimeout,
 	})
 	telemetryUC := telemetryusecase.New(pointRepo, scopeRepo, bus, readsBreaker, log)
+	fleetUC := telemetryusecase.NewFleet(fleetRepo, readsBreaker, log)
 	hub := websocket.NewHub(websocket.Options{
 		Bus:            bus,
 		Authorizer:     telemetryUC,
@@ -126,7 +128,7 @@ func run() error {
 			Auth:      authdelivery.NewHandler(authUC, log),
 			Orders:    ordersdelivery.NewHandler(ordersUC, log),
 			Stores:    storesdelivery.NewHandler(storesUC, log),
-			Telemetry: telemetrydelivery.NewHandler(telemetryUC, hub, tokenSvc, log),
+			Telemetry: telemetrydelivery.NewHandler(telemetryUC, fleetUC, hub, tokenSvc, log),
 		},
 	})
 

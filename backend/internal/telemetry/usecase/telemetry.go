@@ -432,9 +432,11 @@ func (uc *TelemetryUseCase) publish(points []domain.Point, vsByVehicle map[strin
 		ev := domain.PointEvent{
 			VehicleID:  pt.VehicleID,
 			OrderID:    pt.OrderID,
+			DeviceSeq:  pt.DeviceSeq,
 			Lat:        pt.Lat,
 			Lon:        pt.Lon,
 			SpeedKPH:   pt.SpeedKPH,
+			AccuracyM:  pt.AccuracyM,
 			Heading:    pt.Heading,
 			Time:       pt.Time.UTC().Format(time.RFC3339Nano),
 			ReceivedAt: pt.ReceivedAt.UTC().Format(time.RFC3339Nano),

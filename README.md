@@ -12,8 +12,8 @@ Módulo de logística, trazabilidad y telemetría en tiempo real multi-rol (Prov
 |---|---|
 | Backend | Go 1.22 (monolito modular, Clean Architecture) |
 | Base de datos | PostgreSQL + TimescaleDB + PostGIS |
-| Portal web | Placeholder Nginx (Next.js en F4) |
-| App móvil | React Native offline-first (F4) |
+| Portal web | Next.js 16 + React 19 (monorepo `web/`, F4) |
+| App móvil | React Native offline-first (F4, pendiente) |
 
 ## Requisitos
 
@@ -47,7 +47,7 @@ Servicios:
 | API | http://localhost:8080 (`/healthz`, `/readyz`) |
 | **Swagger (OpenAPI 3.1)** | http://localhost:8080/swagger/index.html |
 | Spec OpenAPI | http://localhost:8080/api/v1/openapi.json · `/api/v1/openapi.yaml` |
-| Portal (placeholder) | http://localhost:3000 |
+| Portal web (multi-rol) | http://localhost:3000 |
 | PostgreSQL | `localhost:5432` (`tiendas` / `tiendas_dev`) |
 
 > Las credenciales por defecto son **solo para desarrollo local**. En cualquier otro entorno se inyectan por entorno/secretos y nunca se versionan.
@@ -263,6 +263,62 @@ Protocolo JSON (mensajes de cliente ≤ 4 KiB):
   clientes sin `Origin` (apps nativas) y mismo host.
 - Latencia medida en el e2e local: **~4 ms** (presupuesto RNF-04: 500 ms).
 
+## Portal web multi-rol (F4)
+
+El portal vive en [`web/`](web/README.md) como monorepo npm:
+
+- `@tiendas/tracking-core`: tipos generados desde OpenAPI, cliente HTTP con
+  refresh single-flight, hook `useTracking` con reconexión/backoff, dedupe y
+  estado de conexión.
+- `@tiendas/tracking-ui`: mapa SVG accesible (sin proveedor de tiles, R3),
+  tarjeta de orden, barra de progreso, badges, estados de carga/error/vacío.
+- `apps/portal`: Next.js 16 + React 19 con las vistas por rol y el BFF.
+
+| Vista | Ruta | Rol |
+|---|---|---|
+| Flota y traza en vivo | `/proveedor` | `PROVIDER` |
+| Vista dual entrada/salida, órdenes y enlaces | `/tienda` | `STORE` |
+| Órdenes asignadas (respaldo del móvil) | `/conductor` | `DRIVER` |
+| Seguimiento público | `/seguimiento/{orderId}#t=…` | Invitado |
+
+La sesión usa access token **en memoria** y refresh token en cookie `httpOnly`
+(`path=/api/session`). Las llamadas REST pasan por el proxy same-origin
+`/api/backend/api/v1/*`, así que el backend no necesita CORS. El WebSocket se
+abre directo contra `NEXT_PUBLIC_WS_URL` con el token en query (R12).
+
+```bash
+cd web
+npm install
+npm run gen:api       # tipos desde backend/api/openapi.yaml
+npm run dev           # http://localhost:3000
+npm run typecheck && npm run lint && npm test && npm run build
+```
+
+Con Docker, `make dev` ya construye el portal (`web/Dockerfile` multi-stage,
+`output: standalone`) y lo publica en `http://localhost:3000`.
+
+### Enlace de seguimiento del cliente final
+
+```bash
+# 1) Login de la tienda y datos de una orden propia.
+STORE_TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"tienda1@tiendas.dev","password":"Tienda12345"}' | jq -r .access_token)
+ORDER_ID=$(curl -s http://localhost:8080/api/v1/orders -H "Authorization: Bearer $STORE_TOKEN" \
+  | jq -r '.items[0].id')
+
+# 2) Emitir token de invitado (48 h por defecto).
+GUEST_TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/guest-token \
+  -H "Authorization: Bearer $STORE_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"order_id\":\"$ORDER_ID\"}" | jq -r .token)
+
+# 3) Abrir el enlace en el navegador. El token va en el fragmento (#), no en el servidor.
+echo "http://localhost:3000/seguimiento/$ORDER_ID#t=$GUEST_TOKEN"
+```
+
+El invitado solo puede `GET` esa orden y suscribirse a `order:{orderId}`; la
+lista de flota y cualquier otra orden responden `403`.
+
 ## Datos de demostración (seed)
 
 ```bash
@@ -307,6 +363,8 @@ make vet       # go vet
 make psql      # shell psql en la base de datos
 make e2e-f2    # e2e F2 contra el stack local (72 casos)
 make e2e-f3    # e2e F3: telemetría, RBAC y WebSockets (60 casos)
+make test-web  # pruebas del portal + tracking-core + tracking-ui (58)
+make lint-web  # typecheck + lint + build de producción del portal
 make clean     # baja el stack y BORRA los volúmenes locales
 ```
 
@@ -404,7 +462,10 @@ backend/
 └── pkg/logger/                    # slog estructurado
 scripts/e2e_f2.sh                  # e2e de la F2 (72 casos)
 scripts/e2e_f3.sh                  # e2e de la F3 (60 casos)
-web/                               # placeholder del portal (F4)
+web/                               # portal Next.js + librerías compartidas (F4)
+├── apps/portal/                   # rutas, BFF y paneles por rol
+├── packages/tracking-core/        # cliente OpenAPI, WS y hook useTracking
+└── packages/tracking-ui/          # componentes y estilos compartidos
 doc/                               # plan, arquitectura, modelo de datos
 ```
 
@@ -425,7 +486,7 @@ Las migraciones se aplican automáticamente al arrancar el backend (`MIGRATE_ON_
 | F1 — Esqueleto + Docker Compose | ✅ Completada (2026-10-28) |
 | F2 — Auth, RBAC y órdenes | ✅ Completada (2026-10-28) |
 | F3 — Telemetría y WebSockets | ✅ Completada (2026-10-28) |
-| F4 — Portal y app móvil | ⬜ Pendiente |
+| F4 — Portal y app móvil | 🟨 **Portal completado (2026-10-28); app móvil pendiente** |
 | F5 — Agente IA | ⬜ Pendiente |
 | F6 — Carga, IaC y CI/CD | ⬜ Pendiente |
 

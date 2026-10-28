@@ -273,7 +273,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | **F1** | ✅ **Completada (2026-10-28)** | `docker compose up` OK; `/healthz` y `/readyz` 200; 4 migraciones aplicadas; hypertable + continuous aggregate + retención verificadas |
 | **F2** | ✅ **Completada (2026-10-28)** | Módulos `auth`, `orders` y `stores` + migraciones `0005_auth` y `0006_store_owner_unique`; JWT HS256 con refresh rotativo (hash SHA-256); RBAC de rol y de datos server-side (scope vacío = 403); máquina de estados con `order_events` transaccional; alta de tienda en paso propio del registro (`POST /api/v1/stores`, `GET /api/v1/stores/me`; `store` opcional en register — R11 resuelto); spec OpenAPI 3.1 embebida (`/swagger/index.html`, `/api/v1/openapi.json|yaml`); seed (1 proveedor, 2 tiendas, 3 conductores, 3 vehículos, 10 órdenes georreferenciadas); `go test -race ./...` OK y e2e `scripts/e2e_f2.sh` 72/72 casos OK |
 | F3 | ✅ **Completada (2026-10-28)** | Módulo `telemetry` (ingesta individual y bulk idempotente por `Idempotency-Key` + `sync_receipts`, `latest`/`track` con RBAC y circuit breaker); bus interno `shared/eventbus` (Go channels, descarte contabilizado); hub `shared/websocket` con suscripciones validadas, revalidación de concesiones (`WS_GRANT_TTL`), cierre por expiración de token (`4401`) y por consumidor lento (`1008`); `POST /telemetry/points|bulk`, `GET /vehicles/{id}/latest|track` y `GET /ws` documentados en OpenAPI; seed con 90 puntos demo (30 por vehículo, validado con `curl` sobre `track`); `go test -race ./...` OK (16 paquetes) y e2e `scripts/e2e_f3.sh` 63/63 casos OK con latencia WS de **4,3 ms** (RNF-04 < 500 ms) |
-| F4 | ⬜ Pendiente | — |
+| F4 | 🟨 **Web completada (2026-10-28); app móvil pendiente** | Monorepo `web/` con `@tiendas/tracking-core` (cliente OpenAPI, refresh single-flight, `useTracking` con backoff/dedupe) y `@tiendas/tracking-ui` (mapa SVG accesible, tarjeta de orden, progreso); portal Next.js 16 con login, `/proveedor`, `/tienda` (dual), `/conductor` y `/seguimiento/{id}#t=…`; BFF same-origin con refresh en cookie `httpOnly`; `GET /api/v1/vehicles` para los paneles; 58 pruebas, typecheck/lint/build OK; flujo real validado contra Docker (3 vehículos, orden creada/transicionada, invitado 403 en flota, WS de flota 10,7 ms). App móvil offline-first pendiente (sin emulador/Android SDK en el entorno) |
 | F5 | ⬜ Pendiente | — |
 | F6 | ⬜ Pendiente | — |
 
@@ -335,17 +335,19 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - **Objetivo:** RF-02 (UI), RF-07, RF-08, RF-09, RNF-02.
 - **Depende de:** F2 y F3 para integración (puede arrancar antes con mocks).
 - **Agentes:** `frontend-react` (portal + librerías), `mobile-react-native` (app).
+- **Resultado web (2026-10-28):** ✅ monorepo `web/` con workspaces `@tiendas/portal`, `@tiendas/tracking-core` y `@tiendas/tracking-ui`; tipos generados desde `backend/api/openapi.yaml` (`npm run gen:api`); BFF `/api/session/*` y proxy `/api/backend/*`; paneles de proveedor, tienda y conductor y vista de invitado con datos reales; `GET /api/v1/vehicles` añadido con RBAC; se corrigió el DTO público de `TokenPair` (antes serializaba el usuario de dominio con `PasswordHash` en PascalCase); 58 pruebas (18 core + 26 UI + 14 portal), typecheck/lint/build limpios e imagen Docker validada con login, orden creada/transicionada, enlace de invitado y WS de flota. Ver [`web/README.md`](../web/README.md).
+- **Resultado móvil:** ⬜ pendiente; el entorno no dispone de emulador/Android SDK y el subagente móvil no estaba disponible. La lógica reutilizable (contratos, cliente HTTP, idempotencia) ya existe en `tracking-core`.
 - **Tareas web:**
-  1. Monorepo con `@tiendas/tracking-core` (hook `useTracking(channel)`, reconexión con backoff, estado de conexión) y `@tiendas/tracking-ui` (mapa con capa de vehículos, tarjeta de orden, barra de progreso).
-  2. Portal Next.js: login, panel Proveedor (flota global + mapa), panel Tendero (dual entrada/salida), vista pública de orden por token de invitado, panel de chat IA.
-  3. RBAC en rutas y render condicional (la autoridad sigue siendo el servidor).
-  4. Generar/validar los tipos y cliente HTTP desde `backend/api/openapi.yaml` (ADR-10), sin duplicar definiciones de DTOs a mano.
+  1. ✅ Monorepo con `@tiendas/tracking-core` (hook `useTracking(channel)`, reconexión con backoff, estado de conexión) y `@tiendas/tracking-ui` (mapa con capa de vehículos, tarjeta de orden, barra de progreso).
+  2. ✅ Portal Next.js: login, panel Proveedor (flota global + mapa), panel Tendero (dual entrada/salida), vista pública de orden por token de invitado, panel de chat IA (contrato provisional F5).
+  3. ✅ RBAC en rutas y render condicional (la autoridad sigue siendo el servidor).
+  4. ✅ Generar/validar los tipos y cliente HTTP desde `backend/api/openapi.yaml` (ADR-10), sin duplicar definiciones de DTOs a mano.
 - **Tareas móvil:**
-  1. Login del conductor, lista de órdenes del día, detalle con prueba de entrega.
-  2. Servicio de geolocalización en segundo plano → cola `SyncQueueManager` (WatermelonDB/SQLite).
-  3. Detección de red (NetInfo) → Bulk Sync con idempotency key; barra de estado "X puntos pendientes".
-  4. Transiciones de orden offline con cola de eventos.
-  5. Cliente API tipado generado desde `backend/api/openapi.yaml` (ADR-10) para login, órdenes y bulk sync.
+  1. ⬜ Login del conductor, lista de órdenes del día, detalle con prueba de entrega.
+  2. ⬜ Servicio de geolocalización en segundo plano → cola `SyncQueueManager` (WatermelonDB/SQLite).
+  3. ⬜ Detección de red (NetInfo) → Bulk Sync con idempotency key; barra de estado "X puntos pendientes".
+  4. ⬜ Transiciones de orden offline con cola de eventos.
+  5. ⬜ Cliente API tipado generado desde `backend/api/openapi.yaml` (ADR-10) para login, órdenes y bulk sync.
 - **Criterio de aceptación:** modo avión → los puntos se acumulan localmente; al reactivar la red se sincronizan **sin duplicar** (verificado en backend). El portal renderiza las tres vistas con datos reales.
 - **Pruebas:** unitarias de `tracking-core`, E2E del flujo de sync (Playwright/Detox), verificación básica de accesibilidad (contraste, teclado).
 

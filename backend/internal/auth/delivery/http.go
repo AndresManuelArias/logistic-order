@@ -143,7 +143,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		"role", pair.User.Role,
 	)
 
-	writeJSON(w, http.StatusOK, pair)
+	writeJSON(w, http.StatusOK, toTokenPairResponse(pair))
 }
 
 type refreshRequest struct {
@@ -178,7 +178,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		"trace_id", traceID,
 	)
 
-	writeJSON(w, http.StatusOK, pair)
+	writeJSON(w, http.StatusOK, toTokenPairResponse(pair))
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
@@ -293,6 +293,31 @@ type userResponse struct {
 	Email    string `json:"email"`
 	FullName string `json:"full_name"`
 	Role     string `json:"role"`
+}
+
+// tokenPairResponse replica el contrato `TokenPair` de OpenAPI. El par de
+// tokens se mapea a DTO para no serializar el usuario de dominio (que
+// expondría el hash de contraseña y nombres de campo en PascalCase).
+type tokenPairResponse struct {
+	AccessToken  string        `json:"access_token"`
+	RefreshToken string        `json:"refresh_token"`
+	ExpiresIn    int64         `json:"expires_in"`
+	TokenType    string        `json:"token_type"`
+	User         *userResponse `json:"user,omitempty"`
+}
+
+func toTokenPairResponse(pair *usecase.TokenPair) tokenPairResponse {
+	resp := tokenPairResponse{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresIn:    pair.ExpiresIn,
+		TokenType:    pair.TokenType,
+	}
+	if pair.User != nil {
+		user := toUserResponse(pair.User)
+		resp.User = &user
+	}
+	return resp
 }
 
 func toUserResponse(u *domain.User) userResponse {

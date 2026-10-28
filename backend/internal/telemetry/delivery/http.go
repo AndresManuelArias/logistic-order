@@ -28,23 +28,29 @@ const maxBodyBytes = 1 << 20
 // Handler expone los endpoints de telemetría y monta el canal /ws.
 type Handler struct {
 	uc     *usecase.TelemetryUseCase
+	fleet  *usecase.FleetUseCase
 	hub    *websocket.Hub
 	tokens *token.Service
 	log    *slog.Logger
 }
 
-// NewHandler crea el handler.
-func NewHandler(uc *usecase.TelemetryUseCase, hub *websocket.Hub, tokens *token.Service, log *slog.Logger) *Handler {
-	return &Handler{uc: uc, hub: hub, tokens: tokens, log: log}
+// NewHandler crea el handler. fleet puede ser nil en pruebas aisladas: en ese
+// caso la ruta GET /api/v1/vehicles no se monta.
+func NewHandler(uc *usecase.TelemetryUseCase, fleet *usecase.FleetUseCase, hub *websocket.Hub, tokens *token.Service, log *slog.Logger) *Handler {
+	return &Handler{uc: uc, fleet: fleet, hub: hub, tokens: tokens, log: log}
 }
 
-// RegisterRoutes monta /api/v1/telemetry/* y /api/v1/vehicles/{id}/*.
+// RegisterRoutes monta /api/v1/telemetry/*, /api/v1/vehicles y /api/v1/vehicles/{id}/*.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler, roles func(...string) func(http.Handler) http.Handler) {
 	ingest := func(h http.HandlerFunc) http.Handler {
 		return auth(roles(authz.RoleDriver, authz.RoleProvider)(h))
 	}
 	mux.Handle("POST /api/v1/telemetry/points", ingest(h.Ingest))
 	mux.Handle("POST /api/v1/telemetry/bulk", ingest(h.Bulk))
+	if h.fleet != nil {
+		// Cualquier rol autenticado; el alcance se filtra en el caso de uso.
+		mux.Handle("GET /api/v1/vehicles", auth(http.HandlerFunc(h.ListVehicles)))
+	}
 	mux.Handle("GET /api/v1/vehicles/{id}/latest", auth(http.HandlerFunc(h.Latest)))
 	mux.Handle("GET /api/v1/vehicles/{id}/track", auth(http.HandlerFunc(h.Track)))
 }
