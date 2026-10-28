@@ -10,6 +10,7 @@ package seed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -29,6 +30,7 @@ type Result struct {
 	Vehicles int
 	Drivers  int
 	Orders   int
+	Points   int
 }
 
 // credentials son las credenciales seed (solo desarrollo; ver README).
@@ -62,8 +64,15 @@ func Run(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*Result, er
 		return nil, fmt.Errorf("seed: verificando datos previos: %w", err)
 	}
 	if exists {
-		log.Info("seed: datos ya presentes, nada que hacer")
+		// El seed base ya corrió, pero la demo de telemetría (F3) puede faltar
+		// en bases creadas antes de esta fase: se completa sin tocar nada más.
+		points, err := seedTelemetry(ctx, pool, log)
+		if err != nil {
+			return nil, err
+		}
 		res.Skipped = true
+		res.Points = points
+		log.Info("seed: datos ya presentes, telemetría demo verificada", "points", points)
 		return res, nil
 	}
 
@@ -208,10 +217,106 @@ func Run(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*Result, er
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("seed: commit: %w", err)
 	}
+
+	// Telemetría demo (F3): traza corta por vehículo para que `latest` y
+	// `track` tengan datos en la demo sin depender de la app móvil.
+	points, err := seedTelemetry(ctx, pool, log)
+	if err != nil {
+		return nil, err
+	}
+	res.Points = points
+
 	log.Info("seed completado",
 		"users", res.Users, "stores", res.Stores,
-		"vehicles", res.Vehicles, "drivers", res.Drivers, "orders", res.Orders)
+		"vehicles", res.Vehicles, "drivers", res.Drivers,
+		"orders", res.Orders, "points", res.Points)
 	return res, nil
+}
+
+// seedTelemetry inserta una traza demo para cada vehículo del proveedor seed
+// que aún no tenga muestras. Es idempotente: si el vehículo ya tiene
+// telemetría se omite, de modo que `make seed` nunca duplica ni reescribe.
+func seedTelemetry(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (int, error) {
+	var providerID string
+	err := pool.QueryRow(ctx,
+		`SELECT id::text FROM app.users WHERE email = $1`, providerAcc.Email).Scan(&providerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil // seed base incompleto: nada que completar
+	}
+	if err != nil {
+		return 0, fmt.Errorf("seed telemetría: proveedor: %w", err)
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT v.id::text, v.plate,
+		       COALESCE((
+		           SELECT o.id::text FROM app.orders o
+		           WHERE o.assigned_vehicle_id = v.id AND o.status = 'IN_TRANSIT'
+		           ORDER BY o.placed_at DESC LIMIT 1), '')
+		FROM app.vehicles v
+		WHERE v.provider_id = $1::uuid
+		ORDER BY v.plate`, providerID)
+	if err != nil {
+		return 0, fmt.Errorf("seed telemetría: vehículos: %w", err)
+	}
+
+	type vehicleRow struct {
+		id      string
+		plate   string
+		orderID string
+	}
+	var vehicles []vehicleRow
+	for rows.Next() {
+		var v vehicleRow
+		if err := rows.Scan(&v.id, &v.plate, &v.orderID); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("seed telemetría: scan: %w", err)
+		}
+		vehicles = append(vehicles, v)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("seed telemetría: rows: %w", err)
+	}
+
+	total := 0
+	for i, v := range vehicles {
+		var has bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM telemetry.points WHERE vehicle_id = $1::uuid)`,
+			v.id).Scan(&has); err != nil {
+			return total, fmt.Errorf("seed telemetría: verificando %s: %w", v.plate, err)
+		}
+		if has {
+			continue
+		}
+
+		// Ruta corta y determinista (8 muestras cada 3 min) alrededor de Bogotá.
+		lat := 4.6480 + float64(i)*0.0120
+		lon := -74.0720 + float64(i)*0.0090
+		var order any
+		if v.orderID != "" {
+			order = v.orderID
+		}
+
+		tag, err := pool.Exec(ctx, `
+			INSERT INTO telemetry.points
+			    (time, vehicle_id, device_seq, order_id, location,
+			     speed_kph, accuracy_m, heading, source)
+			SELECT now() - (g * interval '3 minutes'),
+			       $1::uuid, g + 1, $2::uuid,
+			       ST_SetSRID(ST_MakePoint($3 + g * 0.0007, $4 + g * 0.0005), 4326),
+			       24 + g * 2, 6.5, 45, 'DEVICE'
+			FROM generate_series(0, 7) AS g
+			ON CONFLICT DO NOTHING`, v.id, order, lon, lat)
+		if err != nil {
+			return total, fmt.Errorf("seed telemetría: %s: %w", v.plate, err)
+		}
+		total += int(tag.RowsAffected())
+	}
+
+	log.Info("seed: telemetría demo lista", "inserted_points", total)
+	return total, nil
 }
 
 // insertUser crea un usuario con hash bcrypt y devuelve su ID (rol seed).

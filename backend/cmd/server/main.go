@@ -23,11 +23,17 @@ import (
 	ordersusecase "tiendas-track/backend/internal/orders/usecase"
 	"tiendas-track/backend/internal/shared/config"
 	"tiendas-track/backend/internal/shared/database"
+	"tiendas-track/backend/internal/shared/eventbus"
 	"tiendas-track/backend/internal/shared/httpserver"
+	"tiendas-track/backend/internal/shared/resilience"
 	"tiendas-track/backend/internal/shared/token"
+	"tiendas-track/backend/internal/shared/websocket"
 	storesdelivery "tiendas-track/backend/internal/stores/delivery"
 	storespostgres "tiendas-track/backend/internal/stores/infrastructure/postgres"
 	storesusecase "tiendas-track/backend/internal/stores/usecase"
+	telemetrydelivery "tiendas-track/backend/internal/telemetry/delivery"
+	telemetrypostgres "tiendas-track/backend/internal/telemetry/infrastructure/postgres"
+	telemetryusecase "tiendas-track/backend/internal/telemetry/usecase"
 	"tiendas-track/backend/migrations"
 	"tiendas-track/backend/pkg/logger"
 )
@@ -71,7 +77,7 @@ func run() error {
 		log.Warn("migraciones deshabilitadas (MIGRATE_ON_STARTUP=false)")
 	}
 
-	// --- F2: composición de módulos (auth + orders) -------------------------
+	// --- F2/F3: composición de módulos (auth, orders, stores, telemetry) ----
 	// Regla de Clean Architecture: main es el único lugar que conoce todas las
 	// implementaciones concretas y decide quién inyecta qué a quién.
 	tokenSvc, err := token.New(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL, cfg.GuestTokenTTL)
@@ -87,6 +93,8 @@ func run() error {
 	hasher := authinfrastructure.NewPasswordHasher(cfg.BcryptCost)
 	ordersRepo := orderspostgres.NewOrderRepository(pool)
 	storeRepo := storespostgres.NewStoreRepository(pool)
+	pointRepo := telemetrypostgres.NewPointRepository(pool)
+	scopeRepo := telemetrypostgres.NewScopeRepository(pool)
 
 	// Casos de uso.
 	ordersUC := ordersusecase.New(ordersRepo, log)
@@ -96,12 +104,29 @@ func run() error {
 	authUC := authusecase.New(userRepo, userRepo, refreshRepo, guestRepo,
 		tokenAdapter, hasher, ordersUC.IsAccessibleBy, log)
 
+	// F3: bus en memoria + circuit breaker de lecturas + hub de tiempo real.
+	bus := eventbus.New()
+	readsBreaker := resilience.New(resilience.Settings{
+		Name:             "telemetry-reads",
+		FailureThreshold: cfg.CBFailureThreshold,
+		Timeout:          cfg.CBTimeout,
+	})
+	telemetryUC := telemetryusecase.New(pointRepo, scopeRepo, bus, readsBreaker, log)
+	hub := websocket.NewHub(websocket.Options{
+		Bus:            bus,
+		Authorizer:     telemetryUC,
+		Logger:         log,
+		AllowedOrigins: cfg.WSAllowedOrigins,
+		GrantTTL:       cfg.WSGrantTTL,
+	})
+
 	handler := httpserver.NewWithModules(log, pool, httpserver.Options{
 		Token: tokenSvc,
 		Modules: httpserver.Modules{
-			Auth:   authdelivery.NewHandler(authUC, log),
-			Orders: ordersdelivery.NewHandler(ordersUC, log),
-			Stores: storesdelivery.NewHandler(storesUC, log),
+			Auth:      authdelivery.NewHandler(authUC, log),
+			Orders:    ordersdelivery.NewHandler(ordersUC, log),
+			Stores:    storesdelivery.NewHandler(storesUC, log),
+			Telemetry: telemetrydelivery.NewHandler(telemetryUC, hub, tokenSvc, log),
 		},
 	})
 
@@ -131,6 +156,7 @@ func run() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
+	hub.Close() // cierra las sesiones WS antes de apagar el servidor
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("apagado: %w", err)
 	}

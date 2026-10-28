@@ -56,10 +56,10 @@ func run() error {
 		return err
 	}
 	if res.Skipped {
-		fmt.Println("seed: los datos de demostración ya existen (idempotente, nada que hacer)")
+		fmt.Printf("seed: los datos de demostración ya existen (idempotente); telemetría demo verificada (%d puntos nuevos)\n", res.Points)
 		return nil
 	}
-	fmt.Printf("seed: %d usuarios, %d tiendas, %d vehículos, %d conductores, %d órdenes\n",
-		res.Users, res.Stores, res.Vehicles, res.Drivers, res.Orders)
+	fmt.Printf("seed: %d usuarios, %d tiendas, %d vehículos, %d conductores, %d órdenes, %d puntos de telemetría\n",
+		res.Users, res.Stores, res.Vehicles, res.Drivers, res.Orders, res.Points)
 	return nil
 }

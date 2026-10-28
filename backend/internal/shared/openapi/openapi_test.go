@@ -28,7 +28,7 @@ func TestSpecYAMLValida(t *testing.T) {
 	}
 }
 
-// Todos los endpoints F2 documentados deben existir en el spec (ADR-10:
+// Todos los endpoints F2/F3 documentados deben existir en el spec (ADR-10:
 // el contrato es la fuente de verdad; sin doc no hay endpoint).
 func TestSpecCubreEndpointsF2(t *testing.T) {
 	var doc struct {
@@ -56,6 +56,11 @@ func TestSpecCubreEndpointsF2(t *testing.T) {
 		{"/api/v1/orders/{id}/assignment", "post"},
 		{"/api/v1/stores", "post"},
 		{"/api/v1/stores/me", "get"},
+		{"/api/v1/telemetry/points", "post"},
+		{"/api/v1/telemetry/bulk", "post"},
+		{"/api/v1/vehicles/{id}/latest", "get"},
+		{"/api/v1/vehicles/{id}/track", "get"},
+		{"/ws", "get"},
 	}
 	for _, r := range required {
 		ops, ok := doc.Paths[r.path]
@@ -66,6 +71,93 @@ func TestSpecCubreEndpointsF2(t *testing.T) {
 		if _, ok := ops[r.method]; !ok {
 			t.Errorf("falta documentar %s %s", strings.ToUpper(r.method), r.path)
 		}
+	}
+}
+
+// Todos los $ref internos resuelven: evita contratos roto por renombrados.
+func TestSpecRefsResueltos(t *testing.T) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(SpecYAML(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	var refs []string
+	var walk func(v any)
+	walk = func(v any) {
+		switch node := v.(type) {
+		case map[string]any:
+			for k, child := range node {
+				if k == "$ref" {
+					if s, ok := child.(string); ok {
+						refs = append(refs, s)
+					}
+					continue
+				}
+				walk(child)
+			}
+		case []any:
+			for _, child := range node {
+				walk(child)
+			}
+		}
+	}
+	walk(doc)
+
+	if len(refs) == 0 {
+		t.Fatal("el spec no declara $ref")
+	}
+	for _, ref := range refs {
+		if !strings.HasPrefix(ref, "#/") {
+			t.Errorf("$ref externo no permitido: %s", ref)
+			continue
+		}
+		var cur any = doc
+		for _, part := range strings.Split(strings.TrimPrefix(ref, "#/"), "/") {
+			m, ok := cur.(map[string]any)
+			if !ok {
+				t.Errorf("%s: no resuelve", ref)
+				cur = nil
+				break
+			}
+			cur = m[part]
+		}
+		if cur == nil {
+			t.Errorf("%s: no resuelve", ref)
+		}
+	}
+}
+
+// El contrato de tiempo real (ADR-03/ADR-10) se documenta en /ws y el bulk
+// declara el header Idempotency-Key obligatorio.
+func TestSpecContratoTiempoReal(t *testing.T) {
+	var doc struct {
+		Paths map[string]struct {
+			Get  map[string]any `yaml:"get"`
+			Post map[string]any `yaml:"post"`
+		} `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(SpecYAML(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	ws, ok := doc.Paths["/ws"]
+	if !ok || ws.Get == nil {
+		t.Fatal("falta GET /ws")
+	}
+	if _, ok := ws.Get["x-websocket"]; !ok {
+		t.Error("/ws debe declarar x-websocket (protocolo, canales y límites)")
+	}
+
+	bulk := doc.Paths["/api/v1/telemetry/bulk"].Post
+	params, _ := bulk["parameters"].([]any)
+	found := false
+	for _, p := range params {
+		if m, ok := p.(map[string]any); ok && m["name"] == "Idempotency-Key" && m["in"] == "header" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("el bulk debe documentar el header Idempotency-Key")
 	}
 }
 

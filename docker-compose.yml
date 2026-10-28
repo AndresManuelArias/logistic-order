@@ -45,6 +45,11 @@ services:
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-720h}
       GUEST_TOKEN_TTL: ${GUEST_TOKEN_TTL:-48h}
       BCRYPT_COST: ${BCRYPT_COST:-10}
+      # F3: tiempo real y resiliencia (RF-04, RNF-05).
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8080}
+      WS_GRANT_TTL: ${WS_GRANT_TTL:-60s}
+      CB_FAILURE_THRESHOLD: ${CB_FAILURE_THRESHOLD:-5}
+      CB_TIMEOUT: ${CB_TIMEOUT:-10s}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     restart: unless-stopped

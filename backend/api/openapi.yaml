@@ -38,6 +38,10 @@ tags:
     description: Ciclo de vida de órdenes de logística (RF-05) y asignación de flota (RF-06).
   - name: Stores
     description: Alta y consulta de la tienda del tendero (RF-02), como paso propio del registro.
+  - name: Telemetry
+    description: Ingesta GPS (RF-03), Bulk Sync idempotente (RF-09) y consultas de traza con RBAC.
+  - name: Realtime
+    description: Canal WebSocket `/ws` para posición en tiempo real filtrada por rol (RF-04, ADR-03).
   - name: Ops
     description: Operabilidad del servicio (F1).
 
@@ -636,6 +640,256 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /api/v1/telemetry/points:
+    post:
+      tags: [Telemetry]
+      operationId: ingestPoint
+      summary: Ingesta de una muestra GPS (RF-03)
+      description: |
+        Roles `DRIVER` y `PROVIDER`.
+
+        - `DRIVER`: solo puede reportar su vehículo asignado; si omite
+          `vehicle_id` el servidor lo deriva de su perfil.
+        - `PROVIDER`: solo vehículos de su flota.
+        - Si se envía `order_id`, la orden debe existir y estar asignada a ese
+          vehículo (`422` en caso contrario).
+
+        La clave primaria `(time, vehicle_id, device_seq)` hace la operación
+        idempotente: un reintento del dispositivo responde `201` con
+        `duplicate: true` y **no** reemite el evento de tiempo real.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelemetryPointInput"
+      responses:
+        "201":
+          description: Muestra aceptada (nueva o duplicada).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/telemetry/bulk:
+    post:
+      tags: [Telemetry]
+      operationId: ingestTelemetryBulk
+      summary: Sincronización masiva offline-first (RF-09)
+      description: |
+        Roles `DRIVER` y `PROVIDER`. Hasta **1000 puntos** por lote.
+
+        El header `Idempotency-Key` es obligatorio (8–128 caracteres). El
+        recibo se guarda en `app.sync_receipts` en la **misma transacción** que
+        las muestras: repetir la clave devuelve `already_processed: true` sin
+        insertar ni republicar nada. Los puntos repetidos dentro de un lote
+        nuevo se descartan y se informan en `duplicates`.
+
+        Los eventos de tiempo real solo se publican para las muestras que la
+        base de datos confirmó como nuevas.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Clave idempotente del lote (generada por el dispositivo).
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+          examples: ["device-8f3a-batch-0001"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkSyncRequest"
+      responses:
+        "200":
+          description: Lote procesado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkSyncResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/vehicles/{id}/latest:
+    get:
+      tags: [Telemetry]
+      operationId: getLatestPosition
+      summary: Última posición conocida del vehículo
+      description: |
+        RBAC: `PROVIDER` su flota, `DRIVER` su vehículo, `STORE` los vehículos
+        de sus órdenes (vista dual entrada/salida). El token de invitado **no**
+        tiene acceso REST a telemetría.
+
+        Un vehículo inexistente o ajeno responde `403` (anti-enumeración).
+        La lectura pasa por un circuit breaker: si la base de datos está
+        degradada responde `503 CIRCUIT_OPEN` con `Retry-After`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/VehicleID"
+      responses:
+        "200":
+          description: Última muestra registrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LatestPositionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/vehicles/{id}/track:
+    get:
+      tags: [Telemetry]
+      operationId: getVehicleTrack
+      summary: Traza histórica del vehículo
+      description: |
+        Mismo RBAC que `/latest`. `from` y `to` son obligatorios (RFC3339) y el
+        rango máximo es de 7 días. `limit` por defecto 1000, máximo 5000.
+        Resultados ordenados del más reciente al más antiguo.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/VehicleID"
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1000
+            minimum: 0
+            maximum: 5000
+      responses:
+        "200":
+          description: Traza en el rango solicitado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /ws:
+    get:
+      tags: [Realtime]
+      operationId: connectWebSocket
+      summary: Canal WebSocket de telemetría en tiempo real (RF-04)
+      description: |
+        Handshake autenticado y suscripción autorizada contra el scope del
+        token. El token se envía en `Authorization: Bearer <token>` (clientes
+        nativos) o en `?access_token=<token>` (navegadores). Sin token válido
+        el handshake responde `401` y no hay upgrade.
+
+        La sesión se cierra con código `4401` cuando expira el token que la
+        autenticó (el cliente debe reconectar con uno nuevo). Un cliente que no
+        consume su cola de salida se cierra con `1008`.
+
+        **Canales disponibles** (`<tipo>:<uuid>`):
+
+        | Canal | Quién puede suscribirse |
+        |---|---|
+        | `fleet:provider:{provider_id}` | `PROVIDER` dueño de esa flota |
+        | `fleet:store:{store_id}` | `STORE` dueño de esa tienda (vista dual) |
+        | `order:{order_id}` | `STORE` dueño, `DRIVER` asignado, `PROVIDER` de la flota y el invitado con `scope: order:<id>` |
+        | `vehicle:{vehicle_id}` | `PROVIDER` de la flota, `DRIVER` asignado, `STORE` con una orden de ese vehículo |
+
+        Suscribirse a un canal ajeno responde
+        `{"type":"error","code":"FORBIDDEN_SCOPE",...}` sin cerrar la conexión.
+
+        **Protocolo** (JSON, mensajes de cliente ≤ 4 KiB):
+
+        Cliente → servidor: `{"action":"subscribe","channel":"..."}`,
+        `{"action":"unsubscribe","channel":"..."}`, `{"action":"ping"}`.
+
+        Servidor → cliente: `{"type":"subscribed","channel":"..."}`,
+        `{"type":"unsubscribed","channel":"..."}`,
+        `{"type":"pong"}`, `{"type":"error","code":"...","message":"..."}` y
+        `{"type":"event","channel":"...","at":"...","data":{...}}` donde `data`
+        es un `TelemetryPoint`.
+
+        Las concesiones se revalidan cada `WS_GRANT_TTL` (60 s por defecto):
+        si el scope cambió, la suscripción se revoca.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: access_token
+          in: query
+          required: false
+          description: Alternativa al header `Authorization` para navegadores.
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Upgrade a WebSocket aceptado.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+      x-websocket:
+        path: /ws
+        protocol: JSON
+        channels:
+          - fleet:provider:{provider_id}
+          - fleet:store:{store_id}
+          - order:{order_id}
+          - vehicle:{vehicle_id}
+        closeCodes:
+          "1008": Consumidor lento o límite de canales superado.
+          "4401": Token expirado; reconectar con un token nuevo.
+        limits:
+          maxMessageBytes: 4096
+          maxSubscriptions: 32
+          sendBuffer: 256
+        latencyBudgetMs: 500
+
 components:
   securitySchemes:
     bearerAuth:
@@ -651,6 +905,15 @@ components:
       name: id
       in: path
       required: true
+      schema:
+        type: string
+        format: uuid
+
+    VehicleID:
+      name: id
+      in: path
+      required: true
+      description: Identificador del vehículo.
       schema:
         type: string
         format: uuid
@@ -831,6 +1094,166 @@ components:
           type: string
           format: date-time
 
+    TelemetrySource:
+      type: string
+      enum: [DEVICE, BULK_SYNC]
+      description: Origen de la muestra (ingesta individual o sincronización en bloque).
+
+    TelemetryPointInput:
+      type: object
+      required: [time, lat, lon]
+      description: Muestra GPS enviada por el vehículo o la app del conductor.
+      properties:
+        vehicle_id:
+          type: string
+          format: uuid
+          description: Opcional para `DRIVER` (se deriva de su vehículo asignado).
+        order_id:
+          type: string
+          format: uuid
+          description: Debe estar asignada al vehículo que reporta.
+        time:
+          type: string
+          format: date-time
+          description: Timestamp del dispositivo (máximo 5 min en el futuro).
+        lat:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        lon:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        speed_kph:
+          type: number
+          format: double
+          minimum: 0
+        accuracy_m:
+          type: number
+          format: double
+          minimum: 0
+        heading:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 360
+        device_seq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Secuencia local del dispositivo; parte de la clave de deduplicación.
+
+    TelemetryPoint:
+      type: object
+      required: [vehicle_id, lat, lon, device_seq, source, time, received_at]
+      properties:
+        vehicle_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        device_seq:
+          type: integer
+          format: int64
+        lat:
+          type: number
+          format: double
+        lon:
+          type: number
+          format: double
+        speed_kph:
+          type: number
+          format: double
+        accuracy_m:
+          type: number
+          format: double
+        heading:
+          type: number
+          format: double
+        source:
+          $ref: "#/components/schemas/TelemetrySource"
+        time:
+          type: string
+          format: date-time
+        received_at:
+          type: string
+          format: date-time
+          description: Momento en que el servidor recibió la muestra.
+
+    IngestResponse:
+      type: object
+      required: [point, duplicate]
+      properties:
+        point:
+          $ref: "#/components/schemas/TelemetryPoint"
+        duplicate:
+          type: boolean
+          description: '`true` si la PK ya existía (reintento del dispositivo).'
+
+    BulkSyncRequest:
+      type: object
+      required: [points]
+      properties:
+        device_id:
+          type: string
+          maxLength: 64
+        points:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/TelemetryPointInput"
+
+    BulkSyncResponse:
+      type: object
+      required: [accepted, duplicates, already_processed, processed_at]
+      properties:
+        accepted:
+          type: integer
+          description: Muestras realmente insertadas y publicadas.
+        duplicates:
+          type: integer
+          description: Muestras descartadas por la clave primaria o por lote ya procesado.
+        already_processed:
+          type: boolean
+          description: La `Idempotency-Key` ya se había procesado (no se reinsertó nada).
+        processed_at:
+          type: string
+          format: date-time
+
+    LatestPositionResponse:
+      type: object
+      required: [vehicle_id, point]
+      properties:
+        vehicle_id:
+          type: string
+          format: uuid
+        point:
+          $ref: "#/components/schemas/TelemetryPoint"
+
+    TrackResponse:
+      type: object
+      required: [vehicle_id, from, to, count, points]
+      properties:
+        vehicle_id:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        count:
+          type: integer
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/TelemetryPoint"
+
   responses:
     BadRequest:
       description: Cuerpo JSON malformado o entrada no legible.
@@ -864,6 +1287,14 @@ components:
             $ref: "#/components/schemas/Error"
     InternalError:
       description: Error inesperado del servidor.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: |
+        Dependencia degradada. En telemetría indica circuit breaker abierto
+        (`503 CIRCUIT_OPEN`); incluye `Retry-After`.
       content:
         application/json:
           schema:

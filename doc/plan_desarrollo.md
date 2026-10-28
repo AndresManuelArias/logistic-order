@@ -272,7 +272,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 |---|---|---|
 | **F1** | ✅ **Completada (2026-10-28)** | `docker compose up` OK; `/healthz` y `/readyz` 200; 4 migraciones aplicadas; hypertable + continuous aggregate + retención verificadas |
 | **F2** | ✅ **Completada (2026-10-28)** | Módulos `auth`, `orders` y `stores` + migraciones `0005_auth` y `0006_store_owner_unique`; JWT HS256 con refresh rotativo (hash SHA-256); RBAC de rol y de datos server-side (scope vacío = 403); máquina de estados con `order_events` transaccional; alta de tienda en paso propio del registro (`POST /api/v1/stores`, `GET /api/v1/stores/me`; `store` opcional en register — R11 resuelto); spec OpenAPI 3.1 embebida (`/swagger/index.html`, `/api/v1/openapi.json|yaml`); seed (1 proveedor, 2 tiendas, 3 conductores, 3 vehículos, 10 órdenes georreferenciadas); `go test -race ./...` OK y e2e `scripts/e2e_f2.sh` 72/72 casos OK |
-| F3 | ⬜ Pendiente | — |
+| F3 | ✅ **Completada (2026-10-28)** | Módulo `telemetry` (ingesta individual y bulk idempotente por `Idempotency-Key` + `sync_receipts`, `latest`/`track` con RBAC y circuit breaker); bus interno `shared/eventbus` (Go channels, descarte contabilizado); hub `shared/websocket` con suscripciones validadas, revalidación de concesiones (`WS_GRANT_TTL`), cierre por expiración de token (`4401`) y por consumidor lento (`1008`); `POST /telemetry/points|bulk`, `GET /vehicles/{id}/latest|track` y `GET /ws` documentados en OpenAPI; seed con 24 puntos demo; `go test -race ./...` OK (16 paquetes) y e2e `scripts/e2e_f3.sh` 60/60 casos OK con latencia WS de **4,3 ms** (RNF-04 < 500 ms) |
 | F4 | ⬜ Pendiente | — |
 | F5 | ⬜ Pendiente | — |
 | F6 | ⬜ Pendiente | — |
@@ -307,7 +307,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - **Criterio de aceptación:** un usuario de un rol **nunca** puede leer recursos de otro rol (probado); transiciones inválidas → 409.
 - **Pruebas:** unitarias de dominio y casos de uso; integración API del happy path y de denegación por rol.
 
-### F3 — Telemetría, WebSockets y filtrado por rol en tiempo real
+### F3 — Telemetría, WebSockets y filtrado por rol en tiempo real ✅ COMPLETADA (2026-10-28)
 - **Objetivo:** RF-03, RF-04, RNF-03, RNF-04.
 - **Depende de:** F1, F2.
 - **Agentes:** `backend-go` (principal), `security` (revisión de scope de canales).
@@ -317,8 +317,18 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   3. Hub WebSocket con suscripciones validadas contra el scope del token; publicación en canales por rol/orden.
   4. Circuit Breaker (`gobreaker`) en el acceso a la base de datos de los caminos de lectura.
   5. Traza histórica y `latest` con RBAC.
+- **Implementación (evidencia):**
+  - **Ingesta por lotes:** `jsonb_to_recordset` expande todo el lote en una sola sentencia `INSERT … ON CONFLICT DO NOTHING RETURNING`; solo se publican las muestras confirmadas como nuevas. El bulk guarda el recibo y los puntos en una única transacción (todo o nada).
+  - **Idempotencia:** PK `(time, vehicle_id, device_seq)` para reintentos del dispositivo; `Idempotency-Key` (8–128 chars) obligatoria en el bulk. Reintentar devuelve `already_processed: true` sin reinsertar ni republicar.
+  - **Bus interno:** `shared/eventbus` pub/sub no bloqueante (buffer 256, descartes contabilizados en `Dropped()`), sin acoplar módulos.
+  - **Hub WS:** protocolo `subscribe|unsubscribe|ping` → `subscribed|unsubscribed|event|error|pong`; canales `fleet:provider`, `fleet:store`, `order` y `vehicle`; autorización server-side al suscribirse y revalidación cada `WS_GRANT_TTL` (60 s); límites 4 KiB, 32 canales y 256 en cola; `CheckOrigin` con `WS_ALLOWED_ORIGINS`; cierre `4401` al expirar el token.
+  - **RBAC de telemetría:** `DRIVER` solo su vehículo (deriva `vehicle_id` si falta), `PROVIDER` su flota, `STORE` vehículos de sus órdenes (vista dual), invitado denegado en REST y limitado a `order:<id>` en WS. Vehículo ajeno/inexistente → `403` (anti-enumeración); orden no asignada → `422`.
+  - **Resiliencia:** circuit breaker (`sony/gobreaker`) en `latest`/`track`; circuito abierto → `503 CIRCUIT_OPEN` + `Retry-After`. El middleware de logging implementa `http.Hijacker` para no romper el upgrade WS.
+  - **Contrato:** OpenAPI 3.1 con los 4 endpoints REST, schemas de telemetría y extensión `x-websocket` (canales, protocolo, límites y códigos de cierre); el test de contrato exige además que todos los `$ref` internos resuelvan.
+  - **Seed:** 24 puntos demo (8 por vehículo) idempotentes para que `latest`, `track` y el WS tengan datos sin depender de la app móvil.
 - **Criterio de aceptación:** un cliente suscrito a un canal **ajeno** es rechazado; latencia de publicación < 500 ms (RNF-04) medida en local.
-- **Pruebas:** unitarias del hub, integración WS (suscripción válida/inválida), prueba de duplicados.
+  - **Cumplido:** e2e rechaza canal ajeno en WS (`FORBIDDEN_SCOPE`) y REST (`403`); latencia medida extremo a extremo (POST → evento en el socket) **4,3 ms**.
+- **Pruebas:** unitarias del hub (suscripción válida, canal ajeno, canal inválido, unsubscribe, expiración de token, handshake sin auth), del bus, del circuit breaker, de canales y de los casos de uso (RBAC, duplicados, bulk idempotente, rangos); e2e `scripts/e2e_f3.sh` 60/60.
 
 ### F4 — Frontend: librerías, portal multi-rol y app móvil offline-first
 - **Objetivo:** RF-02 (UI), RF-07, RF-08, RF-09, RNF-02.
@@ -420,15 +430,16 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | # | Tema | Tipo | Nota |
 |---|---|---|---|
 | R1 | `estructura_carpeta_portal_web_multi_rol.md` está duplicado con la estructura móvil | **Doc defectuoso** | Corregir o reemplazar por la §4.2 |
-| R2 | Spec OpenAPI desincronizándose de la implementación | **Mitigado en F2** | Spec creada y embebida en el binario; test `internal/shared/openapi` exige que cubra todos los endpoints F2. Mantenerla en cada tarea de endpoint (ADR-10) y validar en F6 con Spectral |
+| R2 | Spec OpenAPI desincronizándose de la implementación | **Mitigado en F2/F3** | Spec creada y embebida en el binario; test `internal/shared/openapi` exige que cubra todos los endpoints F2/F3 y que todos los `$ref` internos resuelvan. Mantenerla en cada tarea de endpoint (ADR-10) y validar en F6 con Spectral |
 | R3 | Motor LLM y proveedor de mapas sin definir | **Decisión pendiente** | Afecta coste, claves y latencia; configurable por env |
 | R4 | Volumen real de vehículos y frecuencia de GPS desconocida | **Supuesto** | El plan asume cientos de vehículos (RNF-06); no hay cifras confirmadas |
 | R5 | Retención y coste de TimescaleDB no definidos | Pendiente | Definir política de retención antes de producción |
-| R6 | WebSockets detrás de reverse proxy/load balancer | Riesgo | Exigir soporte de upgrade (sticky/WS-aware) al desplegar |
+| R6 | WebSockets detrás de reverse proxy/load balancer | Riesgo | Exigir soporte de upgrade (sticky/WS-aware) al desplegar. Mitigado en F3: el middleware HTTP respeta `http.Hijacker` (upgrade OK a través del logging) |
 | R7 | La arquitectura de microservicios documentada no se implementa en esta fase | **ADR-01** | Documentar en el README el camino de extracción futura |
 | R8 | No hay definición de notificaciones (email/SMS) a tenderos/clientes | Fuera de alcance | Confirmar si se incluye o se excluye explícitamente |
 | R11 | Registro `STORE` crea la fila de `stores` junto al usuario (supuesto F2) | **Resuelto (2026-10-28)** | El usuario pidió el alta de tienda como **paso propio**: `POST /api/v1/stores` (rol STORE, 409 si ya tiene) y `GET /api/v1/stores/me`, con `store` ahora **opcional** en `POST /auth/register` (si viene, nace junto al usuario en la misma transacción). Una tienda por dueño protegida por índice único (migración `0006_store_owner_unique`) |
 | R10 | Swagger spec desincronizado de la implementación | Riesgo | Mitigado por ADR-10: el spec se actualiza en la misma tarea del endpoint + validación de contrato en F6 |
+| R12 | Autenticación del handshake WS en navegadores | **Resuelto (2026-10-28)** | Los navegadores no pueden fijar `Authorization` en el handshake: `/ws` acepta `?access_token=` además del header. El token sigue siendo el mismo access token JWT, se valida en servidor y la sesión se cierra al expirar (`4401`). Los clientes nativos usan el header |
 | R9 | Origen de la geocodificación de `orders.destination` sin definir | **Pendiente** | ¿El cliente envía lat/lon o dirección? Definir quién geocodifica (cliente, backend o proveedor externo) — ver `doc/arquitectura/database/modelo_datos.md` §6 |
 
 ---

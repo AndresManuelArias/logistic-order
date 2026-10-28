@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,12 @@ type Config struct {
 	JWTRefreshTTL time.Duration
 	GuestTokenTTL time.Duration
 	BcryptCost    int
+
+	// F3: tiempo real y resiliencia (RF-04, RNF-04, RNF-05).
+	WSAllowedOrigins   []string
+	WSGrantTTL         time.Duration
+	CBFailureThreshold uint32
+	CBTimeout          time.Duration
 }
 
 // Load lee la configuración del entorno. Falla si falta DATABASE_URL,
@@ -64,6 +71,18 @@ func Load() (*Config, error) {
 	cfg.JWTRefreshTTL = getDuration("JWT_REFRESH_TTL", 720*time.Hour) // 30 días
 	cfg.GuestTokenTTL = getDuration("GUEST_TOKEN_TTL", 48*time.Hour)
 
+	// Tiempo real y resiliencia (F3).
+	cfg.WSAllowedOrigins = splitList(getEnv("WS_ALLOWED_ORIGINS",
+		"http://localhost:3000,http://localhost:8080"))
+	cfg.WSGrantTTL = getDuration("WS_GRANT_TTL", 60*time.Second)
+	cfg.CBTimeout = getDuration("CB_TIMEOUT", 10*time.Second)
+
+	threshold, err := getInt32("CB_FAILURE_THRESHOLD", 5)
+	if err != nil {
+		return nil, err
+	}
+	cfg.CBFailureThreshold = uint32(threshold)
+
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
 	}
@@ -78,6 +97,18 @@ func getEnv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// splitList convierte "a, b , c" en []string sin entradas vacías.
+func splitList(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func getBool(key string, def bool) bool {

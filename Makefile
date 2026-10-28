@@ -2,7 +2,7 @@
 COMPOSE ?= docker compose
 BACKEND_DIR := backend
 
-.PHONY: dev up db-up run-local down restart logs ps health seed test build vet fmt tidy psql clean help
+.PHONY: dev up db-up run-local down restart logs ps health seed test build vet fmt tidy psql e2e-f2 e2e-f3 clean help
 
 help: ## Lista de comandos
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -60,6 +60,12 @@ tidy: ## Ordena dependencias
 
 psql: ## Shell psql dentro del contenedor db
 	$(COMPOSE) exec db psql -U $${POSTGRES_USER:-tiendas} -d $${POSTGRES_DB:-tiendas}
+
+e2e-f2: ## E2E F2 contra el stack local (72 casos)
+	bash scripts/e2e_f2.sh
+
+e2e-f3: ## E2E F3: telemetría, RBAC y WebSockets (60 casos)
+	bash scripts/e2e_f3.sh
 
 clean: ## Detiene el stack y borra volúmenes (¡borra datos locales!)
 	$(COMPOSE) down -v

@@ -107,6 +107,88 @@ curl -s http://localhost:8080/api/v1/stores/me -H "Authorization: Bearer $ACCESS
 Respuestas: alta repetida → `409`; coordenadas inválidas o `(0,0)` → `422`;
 rol distinto de `STORE` → `403`.
 
+## Telemetría y tiempo real (F3)
+
+### Ingesta de posiciones (RF-03, RF-09)
+
+```bash
+# Muestra individual. Un DRIVER puede omitir vehicle_id: se deriva de su perfil.
+curl -s -X POST http://localhost:8080/api/v1/telemetry/points \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $DRIVER_TOKEN" \
+  -d '{"time":"2026-10-28T12:00:00Z","lat":4.6612,"lon":-74.0742,"speed_kph":28.5,"device_seq":1}'
+
+# Bulk Sync offline-first: el header Idempotency-Key es obligatorio (8–128 chars).
+curl -s -X POST http://localhost:8080/api/v1/telemetry/bulk \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $DRIVER_TOKEN" \
+  -H 'Idempotency-Key: device-8f3a-batch-0001' \
+  -d '{"device_id":"device-8f3a","points":[
+        {"vehicle_id":"<uuid>","time":"2026-10-28T11:59:00Z","lat":4.65,"lon":-74.07,"device_seq":1},
+        {"vehicle_id":"<uuid>","time":"2026-10-28T12:00:00Z","lat":4.66,"lon":-74.08,"device_seq":2}]}'
+```
+
+- La PK `(time, vehicle_id, device_seq)` deduplica: repetir una muestra responde
+  `201` con `duplicate: true` y **no** reemite el evento.
+- El recibo del bulk (`app.sync_receipts`) y las muestras se guardan en **una
+  transacción**. Repetir la `Idempotency-Key` devuelve `already_processed: true`
+  sin insertar ni republicar; los puntos repetidos de un lote nuevo se informan
+  en `duplicates`.
+- Si se envía `order_id`, debe existir y estar asignada a ese vehículo (`422`).
+- Solo se publican en WebSocket las muestras que la BD confirmó como nuevas.
+
+### Consultas con RBAC
+
+| Endpoint | PROVIDER | DRIVER | STORE | Invitado |
+|---|---|---|---|---|
+| `GET /api/v1/vehicles/{id}/latest` | su flota | su vehículo | vehículos de sus órdenes | `403` |
+| `GET /api/v1/vehicles/{id}/track?from=&to=&limit=` | su flota | su vehículo | vehículos de sus órdenes | `403` |
+| `POST /api/v1/telemetry/points` · `/bulk` | su flota | su vehículo | `403` | `403` |
+
+- `track`: `from`/`to` obligatorios (RFC3339), rango máximo 7 días, `limit`
+  máximo 5000 (1000 por defecto).
+- Un vehículo ajeno o inexistente responde `403` (anti-enumeración).
+- Las lecturas pasan por un **circuit breaker** (`CB_FAILURE_THRESHOLD`,
+  `CB_TIMEOUT`): si la BD está degradada responden `503 CIRCUIT_OPEN` con
+  `Retry-After`.
+
+### WebSocket `/ws` (RF-04, ADR-03)
+
+```bash
+# Navegadores: token en query (no pueden fijar headers en el handshake).
+ws://localhost:8080/ws?access_token=$ACCESS_TOKEN
+# Clientes nativos: Authorization: Bearer <token>
+```
+
+| Canal | Quién puede suscribirse |
+|---|---|
+| `fleet:provider:{provider_id}` | `PROVIDER` dueño de esa flota |
+| `fleet:store:{store_id}` | `STORE` dueño de esa tienda (vista dual) |
+| `order:{order_id}` | `STORE` dueño, `DRIVER` asignado, `PROVIDER` de la flota y el invitado con `scope: order:<id>` |
+| `vehicle:{vehicle_id}` | `PROVIDER` de la flota, `DRIVER` asignado, `STORE` con una orden de ese vehículo |
+
+Protocolo JSON (mensajes de cliente ≤ 4 KiB):
+
+```jsonc
+// cliente → servidor
+{"action":"subscribe","channel":"vehicle:<uuid>"}
+{"action":"unsubscribe","channel":"vehicle:<uuid>"}
+{"action":"ping"}
+
+// servidor → cliente
+{"type":"subscribed","channel":"vehicle:<uuid>"}
+{"type":"unsubscribed","channel":"vehicle:<uuid>"}
+{"type":"pong"}
+{"type":"error","code":"FORBIDDEN_SCOPE","message":"el token no autoriza el canal ..."}
+{"type":"event","channel":"vehicle:<uuid>","at":"...","data":{"vehicle_id":"...","lat":4.65,"lon":-74.07,"time":"...","source":"DEVICE"}}
+```
+
+- Suscribirse a un canal ajeno devuelve `FORBIDDEN_SCOPE` sin cerrar la conexión.
+- Las concesiones se revalidan cada `WS_GRANT_TTL` (60 s por defecto).
+- La sesión se cierra con `4401` al expirar el token y con `1008` si el cliente
+  no consume su cola (32 canales y cola de 256 por conexión).
+- Orígenes permitidos: `WS_ALLOWED_ORIGINS` (coma-separados); vacío = solo
+  clientes sin `Origin` (apps nativas) y mismo host.
+- Latencia medida en el e2e local: **~4 ms** (presupuesto RNF-04: 500 ms).
+
 ## Datos de demostración (seed)
 
 ```bash
@@ -124,7 +206,9 @@ make seed     # idempotente: si ya existen los datos, no hace nada
 
 Crea 10 órdenes con `origin`/`destination` reales de Bogotá (PostGIS) en
 distintos estados (`CREATED`, `IN_TRANSIT`, `DELIVERED`, `CANCELLED`) y sus
-eventos de historial.
+eventos de historial. Además carga **24 puntos de telemetría** (8 por vehículo)
+para que `latest`, `track` y el WebSocket tengan datos en la demo; si un
+vehículo ya tiene muestras, no se duplican.
 
 ## Comandos
 
@@ -141,6 +225,8 @@ make test      # pruebas unitarias del backend
 make build     # compila el backend
 make vet       # go vet
 make psql      # shell psql en la base de datos
+make e2e-f2    # e2e F2 contra el stack local (72 casos)
+make e2e-f3    # e2e F3: telemetría, RBAC y WebSockets (60 casos)
 make clean     # baja el stack y BORRA los volúmenes locales
 ```
 
@@ -215,24 +301,29 @@ backend/
 ├── api/openapi.yaml               # spec OpenAPI 3.1 canónica (ADR-10), embebida
 ├── cmd/server/                    # punto de entrada de la API
 ├── cmd/seed/                      # datos de demostración (make seed)
+├── cmd/wsprobe/                   # sonda de integración WS usada por el e2e F3
 ├── internal/shared/
-│   ├── config/                    # configuración por entorno (JWT_SECRET, TTLs…)
+│   ├── config/                    # configuración por entorno (JWT, WS, circuit breaker)
 │   ├── database/                  # pool, migraciones
 │   ├── httperr/                   # sobre de error { error: { code, message } }
 │   ├── httpserver/                # router, health checks, montaje de módulos
-│   ├── authz/                     # principal, roles, scope de invitado
+│   ├── authz/                     # principal, roles, scope de invitado y canales WS
 │   ├── token/                     # JWT HS256 (access/refresh/guest)
 │   ├── middleware/                # Authenticate, RequireRole
-│   ├── openapi/                   # sirve spec + Swagger UI embebidos
-│   └── websocket/                 # (F3)
+│   ├── eventbus/                  # pub/sub en memoria (Go channels, no bloqueante)
+│   ├── resilience/                # circuit breaker (gobreaker) de lecturas
+│   ├── websocket/                 # hub /ws: concesiones, fan-out, límites
+│   └── openapi/                   # sirve spec + Swagger UI embebidos
 ├── internal/auth/                 # F2: registro, login, refresh rotativo, guest
 ├── internal/orders/               # F2: órdenes, máquina de estados, asignación
 ├── internal/stores/               # F2: alta de tienda (paso propio) y consulta /me
-├── internal/seed/                 # datos demo idempotentes
-├── internal/{telemetry,aiagent}/  # (F3, F5)
+├── internal/telemetry/            # F3: ingesta, bulk idempotente, latest/track, canales
+├── internal/seed/                 # datos demo idempotentes (incluye telemetría)
+├── internal/aiagent/              # F5
 ├── migrations/                    # SQL embebido y versionado (0001…0006)
 └── pkg/logger/                    # slog estructurado
 scripts/e2e_f2.sh                  # e2e de la F2 (72 casos)
+scripts/e2e_f3.sh                  # e2e de la F3 (60 casos)
 web/                               # placeholder del portal (F4)
 doc/                               # plan, arquitectura, modelo de datos
 ```
@@ -253,7 +344,7 @@ Las migraciones se aplican automáticamente al arrancar el backend (`MIGRATE_ON_
 |---|---|
 | F1 — Esqueleto + Docker Compose | ✅ Completada (2026-10-28) |
 | F2 — Auth, RBAC y órdenes | ✅ Completada (2026-10-28) |
-| F3 — Telemetría y WebSockets | ⬜ Pendiente |
+| F3 — Telemetría y WebSockets | ✅ Completada (2026-10-28) |
 | F4 — Portal y app móvil | ⬜ Pendiente |
 | F5 — Agente IA | ⬜ Pendiente |
 | F6 — Carga, IaC y CI/CD | ⬜ Pendiente |

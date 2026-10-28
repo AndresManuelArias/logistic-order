@@ -58,3 +58,8 @@ func Validation(w http.ResponseWriter, code, message string) {
 func Internal(w http.ResponseWriter) {
 	Write(w, http.StatusInternalServerError, "INTERNAL", "error interno")
 }
+
+// ServiceUnavailable 503: dependencia degradada o circuito abierto (RNF-05).
+func ServiceUnavailable(w http.ResponseWriter, code, message string) {
+	Write(w, http.StatusServiceUnavailable, code, message)
+}

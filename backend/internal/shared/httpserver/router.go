@@ -4,9 +4,12 @@
 package httpserver
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -19,15 +22,17 @@ import (
 	"tiendas-track/backend/internal/shared/openapi"
 	"tiendas-track/backend/internal/shared/token"
 	storesdelivery "tiendas-track/backend/internal/stores/delivery"
+	telemetrydelivery "tiendas-track/backend/internal/telemetry/delivery"
 	"tiendas-track/backend/internal/tracing"
 )
 
 // Modules agrupa los handlers de los módulos de negocio a montar en el router.
 // Un módulo no montado (nil) simplemente no publica sus rutas.
 type Modules struct {
-	Auth   *authdelivery.Handler
-	Orders *ordersdelivery.Handler
-	Stores *storesdelivery.Handler
+	Auth      *authdelivery.Handler
+	Orders    *ordersdelivery.Handler
+	Stores    *storesdelivery.Handler
+	Telemetry *telemetrydelivery.Handler
 }
 
 type router struct {
@@ -64,8 +69,9 @@ func NewWithModules(log *slog.Logger, db *pgxpool.Pool, opts Options) http.Handl
 	// F2: documentación OpenAPI embebida (ADR-10), siempre disponible.
 	openapi.Register(mux)
 
-	// F2: módulos de negocio tras middleware de autenticación.
-	anyModule := opts.Modules.Auth != nil || opts.Modules.Orders != nil || opts.Modules.Stores != nil
+	// F2/F3: módulos de negocio tras middleware de autenticación.
+	anyModule := opts.Modules.Auth != nil || opts.Modules.Orders != nil ||
+		opts.Modules.Stores != nil || opts.Modules.Telemetry != nil
 	if opts.Token != nil && anyModule {
 		authenticate := middleware.Authenticate(opts.Token, log)
 		if opts.Modules.Auth != nil {
@@ -76,6 +82,11 @@ func NewWithModules(log *slog.Logger, db *pgxpool.Pool, opts Options) http.Handl
 		}
 		if opts.Modules.Stores != nil {
 			opts.Modules.Stores.RegisterRoutes(mux, authenticate, middleware.RequireRole)
+		}
+		if opts.Modules.Telemetry != nil {
+			opts.Modules.Telemetry.RegisterRoutes(mux, authenticate, middleware.RequireRole)
+			// /ws no cuelga de /api/v1 y autentica el handshake por sí mismo.
+			opts.Modules.Telemetry.RegisterWS(mux)
 		}
 	} else if opts.Token == nil {
 		log.Warn("router: sin JWT_SECRET/servicio de token; los módulos de negocio no se montan")
@@ -170,6 +181,27 @@ func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
 func (rr *responseRecorder) WriteHeader(code int) {
 	rr.status = code
 	rr.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap expone el writer original a http.ResponseController (Go 1.20+).
+func (rr *responseRecorder) Unwrap() http.ResponseWriter { return rr.ResponseWriter }
+
+// Hijack permite que gorilla/websocket haga el upgrade a través del
+// middleware de logging (ADR-03): sin esto /ws responde 500.
+func (rr *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := rr.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("httpserver: el writer no soporta Hijack")
+	}
+	rr.status = http.StatusSwitchingProtocols
+	return hijacker.Hijack()
+}
+
+// Flush mantiene el soporte de streaming (SSE) a través del middleware.
+func (rr *responseRecorder) Flush() {
+	if f, ok := rr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {

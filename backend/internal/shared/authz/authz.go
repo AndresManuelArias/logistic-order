@@ -2,6 +2,8 @@
 // Es un paquete de tipos puros (solo stdlib): lo consumen middleware y casos de uso.
 package authz
 
+import "time"
+
 // TokenType distingue un usuario autenticado de un token de invitado.
 type TokenType string
 
@@ -30,6 +32,10 @@ type Principal struct {
 
 	// Scope del token de invitado: "order:<id>".
 	Scope string
+
+	// ExpiresAt es la expiración del token que originó el principal.
+	// El hub de WebSockets la usa para cerrar sesiones caducadas.
+	ExpiresAt time.Time
 }
 
 // IsGuest indica si el principal proviene de un token de invitado.

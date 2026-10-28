@@ -5,6 +5,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -34,39 +35,57 @@ func WithPrincipal(ctx context.Context, p authz.Principal) context.Context {
 func Authenticate(svc *token.Service, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			raw, ok := bearerToken(r.Header.Get("Authorization"))
+			raw, ok := BearerToken(r)
 			if !ok {
 				httperr.Unauthenticated(w, "token requerido")
 				return
 			}
-			claims, err := svc.Parse(raw)
+			p, err := PrincipalFromToken(svc, raw)
 			if err != nil {
 				log.Debug("token inválido", "error", err)
 				httperr.Unauthenticated(w, "token inválido o expirado")
 				return
 			}
 
-			p := authz.Principal{
-				UserID:     claims.Subject,
-				Role:       claims.Role,
-				StoreID:    claims.StoreID,
-				ProviderID: claims.ProviderID,
-				DriverID:   claims.DriverID,
-				Scope:      claims.Scope,
-			}
-			switch claims.Kind {
-			case token.KindAccess:
-				p.TokenType = authz.AccessToken
-			case token.KindGuest:
-				p.TokenType = authz.GuestToken
-			default:
-				httperr.Unauthenticated(w, "tipo de token no permitido aquí")
-				return
-			}
-
 			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 		})
 	}
+}
+
+// BearerToken extrae el token del header Authorization.
+func BearerToken(r *http.Request) (string, bool) {
+	return bearerToken(r.Header.Get("Authorization"))
+}
+
+// PrincipalFromToken valida un token en claro y devuelve el principal.
+// Solo admite access tokens: refresh/otros tipos no autentican peticiones.
+func PrincipalFromToken(svc *token.Service, raw string) (authz.Principal, error) {
+	claims, err := svc.Parse(raw)
+	if err != nil {
+		return authz.Principal{}, err
+	}
+
+	p := authz.Principal{
+		UserID:     claims.Subject,
+		Role:       claims.Role,
+		StoreID:    claims.StoreID,
+		ProviderID: claims.ProviderID,
+		DriverID:   claims.DriverID,
+		Scope:      claims.Scope,
+	}
+	if claims.ExpiresAt != nil {
+		p.ExpiresAt = claims.ExpiresAt.Time
+	}
+
+	switch claims.Kind {
+	case token.KindAccess:
+		p.TokenType = authz.AccessToken
+	case token.KindGuest:
+		p.TokenType = authz.GuestToken
+	default:
+		return authz.Principal{}, errors.New("tipo de token no permitido aquí")
+	}
+	return p, nil
 }
 
 // RequireRole rechaza con 403 si el principal no tiene el rol indicado.
