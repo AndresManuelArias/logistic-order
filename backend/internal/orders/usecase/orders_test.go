@@ -250,6 +250,19 @@ func TestListAplicaScopeDelRol(t *testing.T) {
 	if _, _, err := uc.List(ctx, authz.Principal{TokenType: authz.GuestToken}, nil, 0, 0); !errors.Is(err, domain.ErrForbiddenScope) {
 		t.Errorf("invitado list: err = %v", err)
 	}
+
+	// Scope vacío = sin identidad de datos: listar sin filtro rompería el
+	// aislamiento (un STORE sin tienda vería todas las órdenes).
+	noScope := []authz.Principal{
+		{Role: authz.RoleStore, TokenType: authz.AccessToken},    // STORE sin tienda
+		{Role: authz.RoleDriver, TokenType: authz.AccessToken},   // DRIVER sin driver_id
+		{Role: authz.RoleProvider, TokenType: authz.AccessToken}, // PROVIDER sin provider_id
+	}
+	for _, p := range noScope {
+		if _, _, err := uc.List(ctx, p, nil, 0, 0); !errors.Is(err, domain.ErrForbiddenScope) {
+			t.Errorf("%s sin scope: err = %v, esperado ErrForbiddenScope", p.Role, err)
+		}
+	}
 }
 
 // Solo el conductor asignado o la tienda dueña transicionan; y solo si es legal.

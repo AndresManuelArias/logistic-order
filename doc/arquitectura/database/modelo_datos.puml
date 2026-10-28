@@ -201,6 +201,9 @@ note bottom of orders
   • idx_points_location ON points USING GIST (location)
   • idx_stores_location ON stores USING GIST (location)
 
+  **Unicidad (migración 0006):**
+  • idx_stores_owner_unique ON stores (owner_user_id) — una tienda por dueño
+
   **Consultas espaciales típicas:**
   • ST_DWithin(destination, ST_MakePoint(lon,lat), radio_m)
   • ST_Distance_Sphere(origin, destination)

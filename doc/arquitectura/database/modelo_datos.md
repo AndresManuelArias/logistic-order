@@ -52,6 +52,17 @@ CREATE INDEX idx_stores_location    ON stores  USING GIST (location);
 CREATE INDEX idx_points_location    ON telemetry.points USING GIST (location);
 ```
 
+### 1.3.1 Restricción de unicidad de tienda (migración 0006)
+
+```sql
+-- Una tienda por dueño (RF-02): la regla deja de vivir solo en la aplicación.
+CREATE UNIQUE INDEX idx_stores_owner_unique ON stores (owner_user_id);
+```
+
+Cubre el alta de tienda en paso propio (`POST /api/v1/stores`): dos altas
+simultáneas del mismo usuario colisionan en el índice y la segunda se traduce
+en `409` (código SQL `23505`).
+
 ### 1.4 Ejemplos de consultas espaciales
 
 ```sql

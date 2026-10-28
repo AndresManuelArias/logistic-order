@@ -184,10 +184,33 @@ func (uc *OrdersUseCase) List(ctx context.Context, p authz.Principal, status *do
 		)
 		return nil, 0, domain.ErrForbiddenScope
 	case p.HasRole(authz.RoleStore):
+		// Sin tienda no hay scope: listar todo rompería el aislamiento.
+		if p.StoreID == "" {
+			uc.log.Error("List: STORE sin tienda, scope vacío",
+				"trace_id", traceID,
+				"user_id", p.UserID,
+			)
+			return nil, 0, domain.ErrForbiddenScope
+		}
 		f.StoreID = p.StoreID
 	case p.HasRole(authz.RoleProvider):
+		if p.ProviderID == "" {
+			uc.log.Error("List: PROVIDER sin identidad de scope",
+				"trace_id", traceID,
+				"user_id", p.UserID,
+			)
+			return nil, 0, domain.ErrForbiddenScope
+		}
 		f.ProviderID = p.ProviderID
 	case p.HasRole(authz.RoleDriver):
+		// Sin driver no hay scope: vería órdenes ajenas.
+		if p.DriverID == "" {
+			uc.log.Error("List: DRIVER sin identidad de scope",
+				"trace_id", traceID,
+				"user_id", p.UserID,
+			)
+			return nil, 0, domain.ErrForbiddenScope
+		}
 		f.DriverID = p.DriverID
 	default:
 		uc.log.Error("List: rol no autorizado",

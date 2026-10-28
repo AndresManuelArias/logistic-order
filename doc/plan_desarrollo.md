@@ -148,6 +148,7 @@ backend/
 │   │   └── resilience/    # circuit breakers (gobreaker)
 │   ├── auth/              # domain / usecase / delivery
 │   ├── orders/            # domain / usecase / delivery
+│   ├── stores/            # domain / usecase / delivery (alta de tienda, paso propio)
 │   ├── telemetry/         # domain / usecase / delivery (ingesta + consulta)
 │   └── aiagent/           # domain / usecase / delivery (herramientas + chat)
 ├── pkg/logger/
@@ -230,10 +231,15 @@ mobile/src/
 - `GET /api/v1/openapi.json` → spec machine-readable para generar clientes (web y móvil) y para pruebas de contrato en `qa`.
 
 **Auth**
+- `POST /api/v1/auth/register` (solo `STORE`/`DRIVER`; el campo `store` es **opcional**: si viene, la tienda nace con el usuario; si no, se da de alta en el paso propio)
 - `POST /api/v1/auth/login` → tokens
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/guest-token` (rol STORE/PROVIDER) → token de invitado para `order_id`
 - `POST /api/v1/auth/logout`
+
+**Tiendas** (rol STORE)
+- `POST /api/v1/stores` → alta de tienda en un paso propio del registro (409 si ya existe una)
+- `GET /api/v1/stores/me` → tienda del usuario (404 si el alta sigue pendiente)
 
 **Órdenes**
 - `POST /api/v1/orders` (idempotency; payload con `origin {lat,lon}` y **`destination {lat,lon}`** o dirección geocodificada) · `GET /api/v1/orders` (filtros: status, store, vehicle, rango de fechas, **radio en metros alrededor de un punto**) · `GET /api/v1/orders/{id}`
@@ -265,7 +271,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | Fase | Estado | Evidencia |
 |---|---|---|
 | **F1** | ✅ **Completada (2026-10-28)** | `docker compose up` OK; `/healthz` y `/readyz` 200; 4 migraciones aplicadas; hypertable + continuous aggregate + retención verificadas |
-| **F2** | ✅ **Completada (2026-10-28)** | Módulos `auth` y `orders` + migración `0005_auth`; JWT HS256 con refresh rotativo (hash SHA-256); RBAC de rol y de datos server-side; máquina de estados con `order_events` transaccional; spec OpenAPI 3.1 embebida (`/swagger/index.html`, `/api/v1/openapi.json|yaml`); seed (1 proveedor, 2 tiendas, 3 conductores, 3 vehículos, 10 órdenes georreferenciadas); `go test ./...` OK y e2e `scripts/e2e_f2.sh` 60/60 casos OK |
+| **F2** | ✅ **Completada (2026-10-28)** | Módulos `auth`, `orders` y `stores` + migraciones `0005_auth` y `0006_store_owner_unique`; JWT HS256 con refresh rotativo (hash SHA-256); RBAC de rol y de datos server-side (scope vacío = 403); máquina de estados con `order_events` transaccional; alta de tienda en paso propio del registro (`POST /api/v1/stores`, `GET /api/v1/stores/me`; `store` opcional en register — R11 resuelto); spec OpenAPI 3.1 embebida (`/swagger/index.html`, `/api/v1/openapi.json|yaml`); seed (1 proveedor, 2 tiendas, 3 conductores, 3 vehículos, 10 órdenes georreferenciadas); `go test -race ./...` OK y e2e `scripts/e2e_f2.sh` 72/72 casos OK |
 | F3 | ⬜ Pendiente | — |
 | F4 | ⬜ Pendiente | — |
 | F5 | ⬜ Pendiente | — |
@@ -297,6 +303,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   4. Token de invitado para Cliente Final, con expiración y scope `order:<id>`.
   5. Seed de datos demo (1 proveedor, 2 tiendas con `location`, 3 conductores, 10 órdenes **con `origin` y `destination` georreferenciadas**).
   6. **Swagger/OpenAPI:** especificación `backend/api/openapi.yaml` (OpenAPI 3.1) con todos los endpoints de F2, servida como Swagger UI en `/swagger/index.html` y spec JSON en `/api/v1/openapi.json`.
+  7. **Alta de tienda en paso propio (R11):** módulo `stores` con `POST /api/v1/stores` y `GET /api/v1/stores/me`; `store` pasa a opcional en el registro y "una tienda por dueño" se protege con índice único (migración `0006`).
 - **Criterio de aceptación:** un usuario de un rol **nunca** puede leer recursos de otro rol (probado); transiciones inválidas → 409.
 - **Pruebas:** unitarias de dominio y casos de uso; integración API del happy path y de denegación por rol.
 
@@ -420,7 +427,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | R6 | WebSockets detrás de reverse proxy/load balancer | Riesgo | Exigir soporte de upgrade (sticky/WS-aware) al desplegar |
 | R7 | La arquitectura de microservicios documentada no se implementa en esta fase | **ADR-01** | Documentar en el README el camino de extracción futura |
 | R8 | No hay definición de notificaciones (email/SMS) a tenderos/clientes | Fuera de alcance | Confirmar si se incluye o se excluye explícitamente |
-| R11 | Registro `STORE` crea la fila de `stores` junto al usuario (supuesto F2) | **Supuesto** | Deriva de que `orders.store_id` es NOT NULL y de la georreferenciación obligatoria (ADR-09); confirmar con el usuario si el tendero debe registrar su tienda en un paso posterior |
+| R11 | Registro `STORE` crea la fila de `stores` junto al usuario (supuesto F2) | **Resuelto (2026-10-28)** | El usuario pidió el alta de tienda como **paso propio**: `POST /api/v1/stores` (rol STORE, 409 si ya tiene) y `GET /api/v1/stores/me`, con `store` ahora **opcional** en `POST /auth/register` (si viene, nace junto al usuario en la misma transacción). Una tienda por dueño protegida por índice único (migración `0006_store_owner_unique`) |
 | R10 | Swagger spec desincronizado de la implementación | Riesgo | Mitigado por ADR-10: el spec se actualiza en la misma tarea del endpoint + validación de contrato en F6 |
 | R9 | Origen de la geocodificación de `orders.destination` sin definir | **Pendiente** | ¿El cliente envía lat/lon o dirección? Definir quién geocodifica (cliente, backend o proveedor externo) — ver `doc/arquitectura/database/modelo_datos.md` §6 |
 

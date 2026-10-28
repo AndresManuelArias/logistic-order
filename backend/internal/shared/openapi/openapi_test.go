@@ -54,6 +54,8 @@ func TestSpecCubreEndpointsF2(t *testing.T) {
 		{"/api/v1/orders/{id}", "get"},
 		{"/api/v1/orders/{id}/status", "patch"},
 		{"/api/v1/orders/{id}/assignment", "post"},
+		{"/api/v1/stores", "post"},
+		{"/api/v1/stores/me", "get"},
 	}
 	for _, r := range required {
 		ops, ok := doc.Paths[r.path]

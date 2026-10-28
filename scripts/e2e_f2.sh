@@ -41,8 +41,15 @@ bootstrap_prov2
 
 cleanup_e2e() {
   docker compose exec -T db psql -U tiendas -d tiendas -q <<'SQL' >/dev/null 2>&1 || true
+-- order_events es append-only (trg_order_events_append_only): se deshabilita
+-- únicamente durante la limpieza de datos de prueba y se restaura al final.
+ALTER TABLE app.order_events DISABLE TRIGGER trg_order_events_append_only;
 DELETE FROM app.order_events WHERE order_id IN (SELECT id FROM app.orders WHERE external_ref LIKE 'E2E-%');
+ALTER TABLE app.order_events ENABLE TRIGGER trg_order_events_append_only;
+DELETE FROM app.guest_tokens WHERE order_id IN (SELECT id FROM app.orders WHERE external_ref LIKE 'E2E-%');
 DELETE FROM app.orders WHERE external_ref LIKE 'E2E-%';
+DELETE FROM app.sync_receipts WHERE driver_id IN (SELECT id FROM app.users WHERE email LIKE 'e2e.%@tiendas.dev');
+DELETE FROM app.ai_query_log WHERE user_id IN (SELECT id FROM app.users WHERE email LIKE 'e2e.%@tiendas.dev');
 DELETE FROM app.stores WHERE owner_user_id IN (SELECT id FROM app.users WHERE email LIKE 'e2e.%@tiendas.dev');
 DELETE FROM app.drivers WHERE user_id IN (SELECT id FROM app.users WHERE email LIKE 'e2e.%@tiendas.dev');
 DELETE FROM app.refresh_tokens WHERE user_id IN (SELECT id FROM app.users WHERE email LIKE 'e2e.%@tiendas.dev');
@@ -64,7 +71,9 @@ chk "GET /swagger/index.html" 200 "$(curl -sS -o /dev/null -w '%{http_code}' "$B
 
 # --- 2. Registro (solo STORE/DRIVER) --------------------------------------
 chk "register STORE con store" 201 "$(post /api/v1/auth/register "$J/reg_store.json" '{"email":"e2e.store@tiendas.dev","password":"Segura12345","full_name":"E2E Store","role":"STORE","store":{"name":"E2E Tienda","address":"Cra 1 # 2-3","location":{"lat":4.6550,"lon":-74.0632}}}')"
-chk "register STORE sin store -> 422" 422 "$(post /api/v1/auth/register "$J/reg_nostore.json" '{"email":"e2e.nostore@tiendas.dev","password":"Segura12345","role":"STORE"}')"
+chk "register STORE sin store -> 201 (alta en paso propio)" 201 "$(post /api/v1/auth/register "$J/reg_nostore.json" '{"email":"e2e.nostore@tiendas.dev","password":"Segura12345","role":"STORE"}')"
+chk "register STORE con store inválido -> 422" 422 "$(post /api/v1/auth/register "$J/reg_badstore.json" '{"email":"e2e.badstore@tiendas.dev","password":"Segura12345","role":"STORE","store":{"name":"Nula","location":{"lat":0,"lon":0}}}')"
+chk "register DRIVER con store -> 422" 422 "$(post /api/v1/auth/register "$J/reg_drvstore.json" '{"email":"e2e.drvstore@tiendas.dev","password":"Segura12345","role":"DRIVER","store":{"name":"No","location":{"lat":4.65,"lon":-74.05}}}')"
 chk "register duplicado -> 409" 409 "$(post /api/v1/auth/register "$J/reg_dup.json" '{"email":"e2e.store@tiendas.dev","password":"Segura12345","role":"STORE","store":{"name":"Dup","location":{"lat":4.65,"lon":-74.05}}}')"
 chk "register PROVIDER -> 422" 422 "$(post /api/v1/auth/register "$J/reg_prov.json" '{"email":"e2e.prov@tiendas.dev","password":"Segura12345","role":"PROVIDER"}')"
 chk "register rol desconocido -> 422" 422 "$(post /api/v1/auth/register "$J/reg_bad.json" '{"email":"e2e.bad@tiendas.dev","password":"Segura12345","role":"HACKER"}')"
@@ -82,6 +91,9 @@ chk "login usuario inexistente -> 401" 401 "$(post /api/v1/auth/login "$J/login_
 # Usuario seed proveedor (rol que no se auto-registra)
 chk "login PROVIDER seed" 200 "$(post /api/v1/auth/login "$J/login_prov.json" '{"email":"proveedor@tiendas.dev","password":"Proveedor123"}')"
 PROV_AT=$(jqr "$J/login_prov.json" access_token)
+# Tienda registrada SIN tienda creada (alta pendiente en /api/v1/stores)
+chk "login STORE sin tienda" 200 "$(post /api/v1/auth/login "$J/login_nostore.json" '{"email":"e2e.nostore@tiendas.dev","password":"Segura12345"}')"
+NOSTORE_AT=$(jqr "$J/login_nostore.json" access_token)
 chk "login tienda seed" 200 "$(post /api/v1/auth/login "$J/login_t1.json" '{"email":"tienda1@tiendas.dev","password":"Tienda12345"}')"
 SEEDSTORE_AT=$(jqr "$J/login_t1.json" access_token)
 chk "login conductor seed 1" 200 "$(post /api/v1/auth/login "$J/login_d1.json" '{"email":"conductor1@tiendas.dev","password":"Conductor123"}')"
@@ -103,7 +115,18 @@ FINAL_RT=$(jqr "$J/ref3.json" refresh_token); FINAL_AT=$(jqr "$J/ref3.json" acce
 chk "logout OK -> 204" 204 "$(curl -sS -o "$J/logout.json" -w '%{http_code}' -X POST "$BASE/api/v1/auth/logout" -H 'Content-Type: application/json' -d "{\"refresh_token\":\"$FINAL_RT\"}")"
 chk "refresh tras logout -> 401" 401 "$(post /api/v1/auth/refresh "$J/ref4.json" "{\"refresh_token\":\"$FINAL_RT\"}")"
 
-# --- 6. Creación de órdenes (STORE) y aislamiento -------------------------
+# --- 6. Alta de tienda (paso propio del registro) --------------------------
+chk "POST /stores sin token -> 401" 401 "$(curl -sS -o "$J/st_no.json" -w '%{http_code}' -X POST "$BASE/api/v1/stores" -H 'Content-Type: application/json' -d '{}')"
+chk "POST /stores rol DRIVER -> 403" 403 "$(curl -sS -o "$J/st_drv.json" -w '%{http_code}' -X POST "$BASE/api/v1/stores" -H 'Content-Type: application/json' -H "Authorization: Bearer $DRV_AT" -d '{"name":"No","location":{"lat":4.65,"lon":-74.05}}')"
+chk "GET /stores/me sin tienda -> 404" 404 "$(get /api/v1/stores/me "$J/st_me_none.json" "$NOSTORE_AT")"
+chk "GET /stores/me rol DRIVER -> 403" 403 "$(get /api/v1/stores/me "$J/st_me_drv.json" "$DRV_AT")"
+chk "POST /stores coordenada nula -> 422" 422 "$(postAuth /api/v1/stores '{"name":"Nula","location":{"lat":0,"lon":0}}' "$J/st_bad.json" "$NOSTORE_AT")"
+chk "POST /stores alta" 201 "$(postAuth /api/v1/stores '{"name":"E2E Sin Registro","address":"Calle 9 # 9-9","location":{"lat":4.6601,"lon":-74.0721}}' "$J/st1.json" "$NOSTORE_AT")"
+chk "POST /stores segunda alta -> 409" 409 "$(postAuth /api/v1/stores '{"name":"Dup","location":{"lat":4.66,"lon":-74.07}}' "$J/st2.json" "$NOSTORE_AT")"
+chk "GET /stores/me con tienda" 200 "$(get /api/v1/stores/me "$J/st_me.json" "$NOSTORE_AT")"
+chk "GET /stores/me tienda del registro" 200 "$(get /api/v1/stores/me "$J/st_me2.json" "$STORE_AT")"
+
+# --- 7. Creación de órdenes (STORE) y aislamiento -------------------------
 NEW_AT=$FINAL_AT
 chk "POST /orders (tienda propia)" 201 "$(postAuth /api/v1/orders '{"external_ref":"E2E-1001","origin":{"lat":4.6550,"lon":-74.0632},"destination":{"lat":4.6578,"lon":-74.0561},"destination_address":"Cra 7 # 72-40"}' "$J/order1.json" "$NEW_AT")"
 OID=$(jqr "$J/order1.json" id)
@@ -114,7 +137,7 @@ chk "POST /orders coordenada nula -> 422" 422 "$(postAuth /api/v1/orders '{"exte
 chk "POST /orders sin token -> 401" 401 "$(curl -sS -o "$J/order5.json" -w '%{http_code}' -X POST "$BASE/api/v1/orders" -H 'Content-Type: application/json' -d '{}')"
 chk "POST /orders rol DRIVER -> 403" 403 "$(curl -sS -o "$J/order6.json" -w '%{http_code}' -X POST "$BASE/api/v1/orders" -H 'Content-Type: application/json' -H "Authorization: Bearer $DRV_AT" -d '{"external_ref":"E2E-1004","origin":{"lat":4.65,"lon":-74.05},"destination":{"lat":4.66,"lon":-74.06}}')"
 
-# --- 7. RBAC de datos en lectura ------------------------------------------
+# --- 8. RBAC de datos en lectura ------------------------------------------
 chk "tienda dueña ve su orden" 200 "$(get "/api/v1/orders/$OID" "$J/g1.json" "$NEW_AT")"
 chk "rol ajeno ve orden -> 403" 403 "$(get "/api/v1/orders/$OID" "$J/g2.json" "$DRV2_AT")"
 chk "conductor2 no ve orden del conductor1 -> 403" 403 "$(get "/api/v1/orders/$OID" "$J/g3.json" "$DRV2_AT")"
@@ -126,7 +149,7 @@ chk "list orders sin token -> 401" 401 "$(get "/api/v1/orders" "$J/l3.json" "")"
 O_TRANSIT=$(docker compose exec -T db psql -U tiendas -d tiendas -Atc "SELECT id FROM app.orders WHERE external_ref='PED-1002'" 2>/dev/null | grep -Eo '[0-9a-f-]{36}' | head -1)
 chk "conductor asignado ve su orden" 200 "$(get "/api/v1/orders/$O_TRANSIT" "$J/g4.json" "$DRV_AT")"
 
-# --- 8. Máquina de estados -------------------------------------------------
+# --- 9. Máquina de estados -------------------------------------------------
 chk "CREATED -> IN_TRANSIT" 200 "$(patch "/api/v1/orders/$OID/status" "$J/s1.json" '{"status":"IN_TRANSIT"}' "$NEW_AT")"
 chk "IN_TRANSIT -> DELIVERED" 200 "$(patch "/api/v1/orders/$OID/status" "$J/s2.json" '{"status":"DELIVERED"}' "$NEW_AT")"
 chk "DELIVERED -> IN_TRANSIT (409)" 409 "$(patch "/api/v1/orders/$OID/status" "$J/s3.json" '{"status":"IN_TRANSIT"}' "$NEW_AT")"
@@ -139,7 +162,7 @@ chk "CREATED -> CANCELLED" 200 "$(patch "/api/v1/orders/$O_CREATED/status" "$J/s
 chk "CANCELLED terminal (409)" 409 "$(patch "/api/v1/orders/$O_CREATED/status" "$J/s7.json" '{"status":"CREATED"}' "$SEEDSTORE_AT")"
 chk "rol ajeno transiciona -> 403" 403 "$(patch "/api/v1/orders/$O_CREATED/status" "$J/s8.json" '{"status":"CANCELLED"}' "$DRV_AT")"
 
-# --- 9. Asignación de flota (PROVIDER) -------------------------------------
+# --- 10. Asignación de flota (PROVIDER) -------------------------------------
 VEH=$(docker compose exec -T db psql -U tiendas -d tiendas -Atc "SELECT id FROM app.vehicles WHERE plate='ABC123'" 2>/dev/null | grep -Eo '[0-9a-f-]{36}' | head -1)
 DRV=$(docker compose exec -T db psql -U tiendas -d tiendas -Atc "SELECT d.id FROM app.drivers d JOIN app.vehicles v ON v.id=d.vehicle_id WHERE v.plate='ABC123'" 2>/dev/null | grep -Eo '[0-9a-f-]{36}' | head -1)
 O_ASSIGN=$(docker compose exec -T db psql -U tiendas -d tiendas -Atc "SELECT id FROM app.orders WHERE external_ref='PED-1005'" 2>/dev/null | grep -Eo '[0-9a-f-]{36}' | head -1)
@@ -149,7 +172,7 @@ VEH_AJENO=$(docker compose exec -T db psql -U tiendas -d tiendas -Atc "SELECT id
 DRV_AJENO=$(docker compose exec -T db psql -U tiendas -d tiendas -Atc "SELECT d.id FROM app.drivers d JOIN app.vehicles v ON v.id=d.vehicle_id WHERE v.plate='XYZ999'" 2>/dev/null | tr -d '\r\n')
 chk "asignar vehículo de otra flota -> 403" 403 "$(curl -sS -o "$J/a3.json" -w '%{http_code}' -X POST "$BASE/api/v1/orders/$O_ASSIGN/assignment" -H 'Content-Type: application/json' -H "Authorization: Bearer $PROV_AT" -d "{\"vehicle_id\":\"$VEH_AJENO\",\"driver_id\":\"$DRV_AJENO\"}")"
 
-# --- 10. Token de invitado (scope order:<id>) ------------------------------
+# --- 11. Token de invitado (scope order:<id>) ------------------------------
 chk "guest-token (tienda dueña, auth)" 201 "$(curl -sS -o "$J/gt1.json" -w '%{http_code}' -X POST "$BASE/api/v1/auth/guest-token" -H 'Content-Type: application/json' -H "Authorization: Bearer $SEEDSTORE_AT" -d "{\"order_id\":\"$O_ASSIGN\"}")"
 GUEST=$(jqr "$J/gt1.json" token)
 chk "invitado ve SOLO su orden" 200 "$(get "/api/v1/orders/$O_ASSIGN" "$J/go1.json" "$GUEST")"

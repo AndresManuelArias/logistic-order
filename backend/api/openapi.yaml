@@ -36,6 +36,8 @@ tags:
     description: Registro, login, rotación de refresh tokens y tokens de invitado.
   - name: Orders
     description: Ciclo de vida de órdenes de logística (RF-05) y asignación de flota (RF-06).
+  - name: Stores
+    description: Alta y consulta de la tienda del tendero (RF-02), como paso propio del registro.
   - name: Ops
     description: Operabilidad del servicio (F1).
 
@@ -95,10 +97,11 @@ paths:
         Solo admite `role` igual a `STORE` o `DRIVER`. La cuenta de proveedor
         (`PROVIDER`) se crea por seed/administración (RF-01).
 
-        Con `role=STORE` el objeto `store` es **obligatorio**: la tienda nace
-        junto a su dueño porque `orders.store_id` referencia `app.stores` y
-        todo recurso geográfico exige coordenadas (PostGIS, ADR-09).
-        Con `role=DRIVER` el objeto `store` se ignora.
+        El objeto `store` es **opcional**: si se incluye, la tienda nace junto
+        a su dueño en la misma transacción; si se omite, el alta se hace luego
+        con `POST /api/v1/stores` (un paso propio del registro). Si `store`
+        viene, solo se admite con `role=STORE` y exige coordenadas (PostGIS,
+        ADR-09).
       requestBody:
         required: true
         content:
@@ -121,7 +124,9 @@ paths:
                   enum: [STORE, DRIVER]
                 store:
                   type: object
-                  description: Obligatorio cuando `role=STORE`.
+                  description: |
+                    Opcional. Solo con `role=STORE`; si se omite, la tienda se
+                    da de alta con `POST /api/v1/stores`.
                   required: [name, location]
                   properties:
                     name:
@@ -151,7 +156,7 @@ paths:
                   role: DRIVER
       responses:
         "201":
-          description: Usuario creado (y su tienda, si `role=STORE`).
+          description: Usuario creado (y su tienda, si el payload incluye `store`).
           content:
             application/json:
               schema:
@@ -326,6 +331,82 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/v1/stores:
+    post:
+      tags: [Stores]
+      operationId: createStore
+      summary: Da de alta la tienda del tendero (rol STORE, paso propio del registro)
+      description: |
+        El alta de tienda es un paso separado de `POST /api/v1/auth/register`:
+        el usuario `STORE` puede registrarse primero y crear su tienda después
+        (o hacerlo en el mismo registro incluyendo `store`). Solo existe una
+        tienda por dueño: repetir el alta devuelve `409`. El punto se persiste
+        como `geometry(Point,4326)` con PostGIS (ADR-09).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStoreRequest"
+            examples:
+              bogota:
+                summary: Tienda en Bogotá
+                value:
+                  name: Tienda La Esquina
+                  address: Cra 7 # 72-40, Bogotá
+                  location: { lat: 4.6550, lon: -74.0632 }
+      responses:
+        "201":
+          description: Tienda creada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Store"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: El usuario ya tiene una tienda registrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/stores/me:
+    get:
+      tags: [Stores]
+      operationId: getMyStore
+      summary: Devuelve la tienda del usuario autenticado (rol STORE)
+      description: |
+        Útil para saber si el alta sigue pendiente: si el usuario aún no tiene
+        tienda responde `404`.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tienda del usuario.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Store"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/orders:
     post:
@@ -642,6 +723,45 @@ components:
           format: double
           minimum: -180
           maximum: 180
+
+    CreateStoreRequest:
+      type: object
+      required: [name, location]
+      description: Alta de tienda como paso propio del registro (RF-02).
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        address:
+          type: string
+          description: Opcional (puede quedar vacío).
+        location:
+          $ref: "#/components/schemas/Point"
+
+    Store:
+      type: object
+      required: [id, name, owner_user_id, lat, lon, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        owner_user_id:
+          type: string
+          format: uuid
+          description: Usuario con rol STORE dueño de la tienda (una por dueño).
+        address:
+          type: string
+        lat:
+          type: number
+          format: double
+        lon:
+          type: number
+          format: double
+        created_at:
+          type: string
+          format: date-time
 
     OrderStatus:
       type: string

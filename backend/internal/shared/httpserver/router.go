@@ -18,6 +18,7 @@ import (
 	"tiendas-track/backend/internal/shared/middleware"
 	"tiendas-track/backend/internal/shared/openapi"
 	"tiendas-track/backend/internal/shared/token"
+	storesdelivery "tiendas-track/backend/internal/stores/delivery"
 	"tiendas-track/backend/internal/tracing"
 )
 
@@ -26,6 +27,7 @@ import (
 type Modules struct {
 	Auth   *authdelivery.Handler
 	Orders *ordersdelivery.Handler
+	Stores *storesdelivery.Handler
 }
 
 type router struct {
@@ -63,13 +65,17 @@ func NewWithModules(log *slog.Logger, db *pgxpool.Pool, opts Options) http.Handl
 	openapi.Register(mux)
 
 	// F2: módulos de negocio tras middleware de autenticación.
-	if opts.Token != nil && (opts.Modules.Auth != nil || opts.Modules.Orders != nil) {
+	anyModule := opts.Modules.Auth != nil || opts.Modules.Orders != nil || opts.Modules.Stores != nil
+	if opts.Token != nil && anyModule {
 		authenticate := middleware.Authenticate(opts.Token, log)
 		if opts.Modules.Auth != nil {
 			opts.Modules.Auth.RegisterRoutes(mux, authenticate)
 		}
 		if opts.Modules.Orders != nil {
 			opts.Modules.Orders.RegisterRoutes(mux, authenticate, middleware.RequireRole)
+		}
+		if opts.Modules.Stores != nil {
+			opts.Modules.Stores.RegisterRoutes(mux, authenticate, middleware.RequireRole)
 		}
 	} else if opts.Token == nil {
 		log.Warn("router: sin JWT_SECRET/servicio de token; los módulos de negocio no se montan")

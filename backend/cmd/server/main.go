@@ -25,6 +25,9 @@ import (
 	"tiendas-track/backend/internal/shared/database"
 	"tiendas-track/backend/internal/shared/httpserver"
 	"tiendas-track/backend/internal/shared/token"
+	storesdelivery "tiendas-track/backend/internal/stores/delivery"
+	storespostgres "tiendas-track/backend/internal/stores/infrastructure/postgres"
+	storesusecase "tiendas-track/backend/internal/stores/usecase"
 	"tiendas-track/backend/migrations"
 	"tiendas-track/backend/pkg/logger"
 )
@@ -83,9 +86,11 @@ func run() error {
 	tokenAdapter := authinfrastructure.NewJWTAdapter(tokenSvc)
 	hasher := authinfrastructure.NewPasswordHasher(cfg.BcryptCost)
 	ordersRepo := orderspostgres.NewOrderRepository(pool)
+	storeRepo := storespostgres.NewStoreRepository(pool)
 
 	// Casos de uso.
 	ordersUC := ordersusecase.New(ordersRepo, log)
+	storesUC := storesusecase.New(storeRepo, log)
 	// El módulo auth no conoce al de orders: se le inyecta una función que
 	// decide si el llamante puede emitir un token de invitado sobre la orden.
 	authUC := authusecase.New(userRepo, userRepo, refreshRepo, guestRepo,
@@ -96,6 +101,7 @@ func run() error {
 		Modules: httpserver.Modules{
 			Auth:   authdelivery.NewHandler(authUC, log),
 			Orders: ordersdelivery.NewHandler(ordersUC, log),
+			Stores: storesdelivery.NewHandler(storesUC, log),
 		},
 	})
 

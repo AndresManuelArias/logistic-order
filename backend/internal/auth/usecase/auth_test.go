@@ -171,11 +171,19 @@ func TestRegisterValidaEntrada(t *testing.T) {
 	}); !errors.Is(err, domain.ErrWeakPassword) {
 		t.Errorf("contraseña corta: err = %v", err)
 	}
-	// El rol STORE exige el perfil de tienda (sin ella no hay scope de datos).
+	// El registro STORE sin perfil es válido: la tienda se da de alta después
+	// con POST /api/v1/stores (paso propio).
 	if _, err := uc.Register(context.Background(), RegisterInput{
 		Email: "sintienda@b.co", Password: "12345678", Role: "STORE",
+	}); err != nil {
+		t.Errorf("STORE sin perfil: err = %v, esperado nil (alta posterior)", err)
+	}
+	// Solo STORE puede traer perfil de tienda en el registro.
+	if _, err := uc.Register(context.Background(), RegisterInput{
+		Email: "drivercotienda@b.co", Password: "12345678", Role: "DRIVER",
+		Store: &domain.StoreProfile{Name: "No deberia", Lat: 4.7, Lon: -74.1},
 	}); !errors.Is(err, domain.ErrValidation) {
-		t.Errorf("STORE sin perfil: err = %v, esperado ErrValidation", err)
+		t.Errorf("DRIVER con perfil de tienda: err = %v, esperado ErrValidation", err)
 	}
 	// Coordenada inválida en el perfil de tienda (PostGIS, ADR-09).
 	if _, err := uc.Register(context.Background(), RegisterInput{

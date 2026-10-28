@@ -43,7 +43,8 @@ type registerRequest struct {
 	Password string `json:"password"`
 	FullName string `json:"full_name"`
 	Role     string `json:"role"`
-	// Store es obligatorio para role=STORE: la tienda nace con su dueño.
+	// Store es opcional: si viene, la tienda nace con su dueño en el mismo
+	// registro; si no, se da de alta después con POST /api/v1/stores.
 	Store *storePayload `json:"store"`
 }
 

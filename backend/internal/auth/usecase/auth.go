@@ -61,7 +61,9 @@ type RegisterInput struct {
 	FullName string
 	Role     string
 
-	// Store es obligatorio cuando Role == STORE (la tienda nace con su dueño).
+	// Store es opcional para el rol STORE: si viene, la tienda nace con su
+	// dueño en la misma transacción; si no, se da de alta después con
+	// POST /api/v1/stores (una tienda por dueño).
 	// Address es opcional; Name y coordenadas son requeridos (ADR-09).
 	Store *domain.StoreProfile
 }
@@ -121,9 +123,19 @@ func (uc *AuthUseCase) Register(ctx context.Context, in RegisterInput) (*domain.
 		return nil, domain.ErrEmailAlreadyRegistered
 	}
 
-	// El rol STORE nace con su tienda (RF-02): sin perfil no hay aislamiento
-	// de datos posible, porque orders.store_id referencia app.stores.
-	if in.Role == authz.RoleStore {
+	// Solo el rol STORE puede traer perfil de tienda en el registro.
+	if in.Store != nil && in.Role != authz.RoleStore {
+		err := fmt.Errorf("%w: solo el rol STORE puede registrar una tienda", domain.ErrValidation)
+		uc.log.Error("Register: perfil de tienda con rol no STORE",
+			"trace_id", traceID,
+			"role", in.Role,
+		)
+		return nil, err
+	}
+	// El rol STORE puede nacer con su tienda (RF-02) si el payload la incluye;
+	// es opcional porque el alta también puede hacerse después con
+	// POST /api/v1/stores. Si viene, se valida (PostGIS, ADR-09).
+	if in.Store != nil {
 		if err := normalizeStore(in.Store); err != nil {
 			uc.log.Error("Register: perfil de tienda inválido",
 				"trace_id", traceID,
@@ -149,7 +161,7 @@ func (uc *AuthUseCase) Register(ctx context.Context, in RegisterInput) (*domain.
 		Role:         in.Role,
 		Status:       "ACTIVE",
 	}
-	if in.Role == authz.RoleStore {
+	if in.Store != nil {
 		// Usuario + tienda en una sola transacción (consistencia).
 		if _, err := uc.users.CreateWithStore(ctx, u, in.Store); err != nil {
 			uc.log.Error("Register: error creando usuario con tienda",

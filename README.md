@@ -72,7 +72,7 @@ curl -s -X POST http://localhost:8080/api/v1/auth/refresh \
 | Rol | Quién lo tiene | Alcance de datos (server-side) |
 |---|---|---|
 | `PROVIDER` | Solo por seed/administración | Su flota: vehículos y órdenes asignadas a ellos |
-| `STORE` | Auto-registro (crea su tienda) | Solo órdenes de su tienda |
+| `STORE` | Auto-registro (alta de tienda en paso propio) | Solo órdenes de su tienda; sin tienda todavía no tiene alcance (403) |
 | `DRIVER` | Auto-registro | Solo órdenes asignadas a él |
 | Invitado | Token con scope `order:<id>` (48 h) | Solo `GET` de esa orden; nunca lista ni transiciona |
 
@@ -81,7 +81,31 @@ compartan el seguimiento de una orden con el cliente final.
 
 **Endpoints** (contrato completo en Swagger): `POST /auth/register|login|refresh|logout|guest-token`,
 `GET /auth/me`, `GET|POST /orders`, `GET /orders/{id}`, `PATCH /orders/{id}/status`,
-`POST /orders/{id}/assignment`.
+`POST /orders/{id}/assignment`, `POST /stores`, `GET /stores/me`.
+
+### Alta de tienda (paso propio del registro)
+
+El campo `store` de `POST /auth/register` es **opcional**: la tienda puede nacer
+con el usuario o darse de alta después. Solo existe **una tienda por dueño**
+(protegida por índice único en BD):
+
+```bash
+# 1) Registrarse como tendero (sin tienda todavía)
+curl -s -X POST http://localhost:8080/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"tendero@ejemplo.com","password":"Segura12345","full_name":"Tendero","role":"STORE"}'
+
+# 2) Login y alta de la tienda (rol STORE)
+curl -s -X POST http://localhost:8080/api/v1/stores \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -d '{"name":"La Esquina","address":"Cra 7 # 72-40","location":{"lat":4.6550,"lon":-74.0632}}'
+
+# 3) Consultar la tienda propia (404 si el alta sigue pendiente)
+curl -s http://localhost:8080/api/v1/stores/me -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+Respuestas: alta repetida → `409`; coordenadas inválidas o `(0,0)` → `422`;
+rol distinto de `STORE` → `403`.
 
 ## Datos de demostración (seed)
 
@@ -149,7 +173,7 @@ docker compose exec db psql -U ${POSTGRES_USER:-tiendas} -d ${POSTGRES_DB:-tiend
 Pruebas end-to-end de F2 (requiere el stack levantado):
 
 ```bash
-bash scripts/e2e_f2.sh    # 60 casos: auth, RBAC, transiciones, invitado, Swagger
+bash scripts/e2e_f2.sh    # 72 casos: auth, RBAC, tiendas, transiciones, invitado, Swagger
 ```
 
 ## Estructura
@@ -171,11 +195,12 @@ backend/
 │   └── websocket/                 # (F3)
 ├── internal/auth/                 # F2: registro, login, refresh rotativo, guest
 ├── internal/orders/               # F2: órdenes, máquina de estados, asignación
+├── internal/stores/               # F2: alta de tienda (paso propio) y consulta /me
 ├── internal/seed/                 # datos demo idempotentes
 ├── internal/{telemetry,aiagent}/  # (F3, F5)
-├── migrations/                    # SQL embebido y versionado (0001…0005)
+├── migrations/                    # SQL embebido y versionado (0001…0006)
 └── pkg/logger/                    # slog estructurado
-scripts/e2e_f2.sh                  # e2e de la F2 (60 casos)
+scripts/e2e_f2.sh                  # e2e de la F2 (72 casos)
 web/                               # placeholder del portal (F4)
 doc/                               # plan, arquitectura, modelo de datos
 ```
