@@ -29,6 +29,17 @@ make dev                 # docker compose up --build -d
 make health              # verifica /healthz y /readyz
 ```
 
+### Backend local sin Docker
+
+Para inicializar PostgreSQL + TimescaleDB + PostGIS y ejecutar únicamente el backend en la máquina local:
+
+```bash
+cp .env.example .env   # primera vez; ajusta las variables si hace falta
+make run-local         # levanta la base de datos y ejecuta go run ./cmd/server
+```
+
+El backend quedará disponible en `http://localhost:8080`. Para iniciar solo la base de datos, ejecuta `make db-up`.
+
 Servicios:
 
 | Servicio | URL |

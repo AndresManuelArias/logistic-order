@@ -2,7 +2,7 @@
 COMPOSE ?= docker compose
 BACKEND_DIR := backend
 
-.PHONY: dev up down restart logs ps health seed test build vet fmt tidy psql clean help
+.PHONY: dev up db-up run-local down restart logs ps health seed test build vet fmt tidy psql clean help
 
 help: ## Lista de comandos
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -12,6 +12,12 @@ dev: ## Levanta todo el stack (build + detached)
 
 up: ## Levanta sin reconstruir
 	$(COMPOSE) up -d
+
+db-up: ## Inicializa solo la base de datos
+	$(COMPOSE) up db -d
+
+run-local: db-up ## Inicia el backend localmente contra PostgreSQL local
+	cd $(BACKEND_DIR) && set -a && . ../.env && set +a && DATABASE_URL="postgres://$${POSTGRES_USER:-tiendas}:$${POSTGRES_PASSWORD:-tiendas_dev}@localhost:$${DB_PORT:-5432}/$${POSTGRES_DB:-tiendas}?sslmode=disable" go run ./cmd/server
 
 down: ## Detiene y elimina contenedores
 	$(COMPOSE) down
