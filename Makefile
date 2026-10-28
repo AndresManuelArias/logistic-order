@@ -2,7 +2,7 @@
 COMPOSE ?= docker compose
 BACKEND_DIR := backend
 
-.PHONY: dev up down restart logs ps health test build vet fmt tidy psql clean help
+.PHONY: dev up down restart logs ps health seed test build vet fmt tidy psql clean help
 
 help: ## Lista de comandos
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -28,6 +28,14 @@ ps: ## Estado de los servicios
 health: ## Verifica /healthz y /readyz
 	@echo "healthz:" && curl -fsS http://localhost:8080/healthz && echo \
 	&& echo "readyz:" && curl -fsS http://localhost:8080/readyz && echo
+
+seed: ## Carga datos demo (idempotente; credenciales en README)
+	$(COMPOSE) --profile seed run --rm seed
+
+swagger: ## Abre la documentación OpenAPI (imprime la URL)
+	@echo "http://localhost:8080/swagger/index.html" \
+	&& curl -fsS -o /dev/null -w "openapi.json: HTTP %{http_code}\n" \
+	   http://localhost:8080/api/v1/openapi.json
 
 test: ## Pruebas unitarias del backend
 	cd $(BACKEND_DIR) && GOTOOLCHAIN=local go test ./...

@@ -1,5 +1,6 @@
-// Package httpserver arma el router HTTP del monolito.
-// Endpoints de F1: healthz (liveness) y readyz (readiness con ping a BD).
+// Package httpserver arma el router HTTP del monolito modular.
+// Endpoints F1: /healthz (liveness), /readyz (readiness con ping a BD).
+// Endpoints F2: módulos auth y orders + documentación OpenAPI (ADR-10).
 package httpserver
 
 import (
@@ -10,21 +11,69 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	authdelivery "tiendas-track/backend/internal/auth/delivery"
+	ordersdelivery "tiendas-track/backend/internal/orders/delivery"
+	"tiendas-track/backend/internal/shared/httperr"
+	"tiendas-track/backend/internal/shared/middleware"
+	"tiendas-track/backend/internal/shared/openapi"
+	"tiendas-track/backend/internal/shared/token"
 )
+
+// Modules agrupa los handlers de los módulos de negocio a montar en el router.
+// Un módulo no montado (nil) simplemente no publica sus rutas.
+type Modules struct {
+	Auth   *authdelivery.Handler
+	Orders *ordersdelivery.Handler
+}
 
 type router struct {
 	log *slog.Logger
 	db  *pgxpool.Pool
 }
 
-// New construye el handler raíz del servidor.
+// Options son las dependencias transversales del router (F2).
+type Options struct {
+	// Token es el servicio JWT compartido; obligatorio si hay módulos.
+	Token *token.Service
+	// Modules son los handlers de negocio (auth, orders).
+	Modules Modules
+}
+
+// New construye el handler raíz del servidor (solo operabilidad, F1).
 func New(log *slog.Logger, db *pgxpool.Pool) http.Handler {
+	return NewWithModules(log, db, Options{})
+}
+
+// NewWithModules construye el handler raíz con los módulos de negocio (F2).
+// La autenticación y el RBAC de rol se aplican por ruta dentro de cada módulo:
+// las rutas de operabilidad (/healthz, /readyz, /swagger) son públicas.
+func NewWithModules(log *slog.Logger, db *pgxpool.Pool, opts Options) http.Handler {
 	r := &router{log: log, db: db}
 
 	mux := http.NewServeMux()
+
+	// F1: operabilidad.
 	mux.HandleFunc("GET /healthz", r.healthz)
 	mux.HandleFunc("GET /readyz", r.readyz)
-	mux.HandleFunc("GET /", r.root)
+	mux.HandleFunc("GET /{$}", r.root)
+
+	// F2: documentación OpenAPI embebida (ADR-10), siempre disponible.
+	openapi.Register(mux)
+
+	// F2: módulos de negocio tras middleware de autenticación.
+	if opts.Token != nil && (opts.Modules.Auth != nil || opts.Modules.Orders != nil) {
+		authenticate := middleware.Authenticate(opts.Token, log)
+		if opts.Modules.Auth != nil {
+			opts.Modules.Auth.RegisterRoutes(mux, authenticate)
+		}
+		if opts.Modules.Orders != nil {
+			opts.Modules.Orders.RegisterRoutes(mux, authenticate, middleware.RequireRole)
+		}
+	} else if opts.Token == nil {
+		log.Warn("router: sin JWT_SECRET/servicio de token; los módulos de negocio no se montan")
+	}
+
 	return r.recover(mux)
 }
 
@@ -54,7 +103,8 @@ func (r *router) readyz(w http.ResponseWriter, req *http.Request) {
 func (r *router) root(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"service": "tiendas-track-backend",
-		"docs":    "/swagger/index.html (F2, ADR-10)",
+		"docs":    "/swagger/index.html (ADR-10)",
+		"openapi": "/api/v1/openapi.json",
 		"healthz": "/healthz",
 		"readyz":  "/readyz",
 	})
@@ -65,7 +115,7 @@ func (r *router) recover(next http.Handler) http.Handler {
 		defer func() {
 			if rec := recover(); rec != nil {
 				r.log.Error("panic atendiendo petición", "path", req.URL.Path, "panic", rec)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+				httperr.Write(w, http.StatusInternalServerError, "INTERNAL", "error interno")
 			}
 		}()
 		next.ServeHTTP(w, req)

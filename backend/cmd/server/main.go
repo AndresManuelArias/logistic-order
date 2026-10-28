@@ -14,9 +14,17 @@ import (
 
 	"log/slog"
 
+	authdelivery "tiendas-track/backend/internal/auth/delivery"
+	authinfrastructure "tiendas-track/backend/internal/auth/infrastructure"
+	authpostgres "tiendas-track/backend/internal/auth/infrastructure/postgres"
+	authusecase "tiendas-track/backend/internal/auth/usecase"
+	ordersdelivery "tiendas-track/backend/internal/orders/delivery"
+	orderspostgres "tiendas-track/backend/internal/orders/infrastructure/postgres"
+	ordersusecase "tiendas-track/backend/internal/orders/usecase"
 	"tiendas-track/backend/internal/shared/config"
 	"tiendas-track/backend/internal/shared/database"
 	"tiendas-track/backend/internal/shared/httpserver"
+	"tiendas-track/backend/internal/shared/token"
 	"tiendas-track/backend/migrations"
 	"tiendas-track/backend/pkg/logger"
 )
@@ -60,9 +68,40 @@ func run() error {
 		log.Warn("migraciones deshabilitadas (MIGRATE_ON_STARTUP=false)")
 	}
 
+	// --- F2: composición de módulos (auth + orders) -------------------------
+	// Regla de Clean Architecture: main es el único lugar que conoce todas las
+	// implementaciones concretas y decide quién inyecta qué a quién.
+	tokenSvc, err := token.New(cfg.JWTSecret, cfg.JWTAccessTTL, cfg.JWTRefreshTTL, cfg.GuestTokenTTL)
+	if err != nil {
+		return err
+	}
+
+	// Repositorios (PostgreSQL) y adaptadores.
+	userRepo := authpostgres.NewUserRepository(pool)
+	refreshRepo := authpostgres.NewRefreshTokenRepository(pool)
+	guestRepo := authpostgres.NewGuestTokenRepository(pool)
+	tokenAdapter := authinfrastructure.NewJWTAdapter(tokenSvc)
+	hasher := authinfrastructure.NewPasswordHasher(cfg.BcryptCost)
+	ordersRepo := orderspostgres.NewOrderRepository(pool)
+
+	// Casos de uso.
+	ordersUC := ordersusecase.New(ordersRepo)
+	// El módulo auth no conoce al de orders: se le inyecta una función que
+	// decide si el llamante puede emitir un token de invitado sobre la orden.
+	authUC := authusecase.New(userRepo, userRepo, refreshRepo, guestRepo,
+		tokenAdapter, hasher, ordersUC.IsAccessibleBy)
+
+	handler := httpserver.NewWithModules(log, pool, httpserver.Options{
+		Token: tokenSvc,
+		Modules: httpserver.Modules{
+			Auth:   authdelivery.NewHandler(authUC),
+			Orders: ordersdelivery.NewHandler(ordersUC),
+		},
+	})
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.New(log, pool),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

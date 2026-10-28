@@ -38,9 +38,30 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-json}
       SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-10s}
+      # F2: autenticación (RF-01). En producción el secreto llega por
+      # orquestador/secretos, NUNCA por este archivo.
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-720h}
+      GUEST_TOKEN_TTL: ${GUEST_TOKEN_TTL:-48h}
+      BCRYPT_COST: ${BCRYPT_COST:-10}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     restart: unless-stopped
+
+  # Datos de demostración (F2): `make seed`. Idempotente.
+  seed:
+    build: ./backend
+    profiles: ["seed"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-tiendas}:${POSTGRES_PASSWORD:-tiendas_dev}@db:5432/${POSTGRES_DB:-tiendas}?sslmode=disable
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      JWT_SECRET: ${JWT_SECRET:-}
+    command: ["/usr/local/bin/seed"]
+    restart: "no"
 
   web:
     # Placeholder estático hasta F4 (portal Next.js multi-rol).

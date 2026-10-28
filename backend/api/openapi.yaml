@@ -1,0 +1,723 @@
+openapi: 3.1.0
+info:
+  title: Tiendas-Track API
+  version: "2.0.0"
+  description: |
+    API del monolito modular Tiendas-Track (F2: autenticación, RBAC y órdenes).
+
+    **Contrato canónico (ADR-10):** este archivo es la fuente de verdad de los
+    contratos HTTP. Se sirve embebido en el binario en:
+
+    - `GET /api/v1/openapi.yaml` — especificación original.
+    - `GET /api/v1/openapi.json` — especificación en JSON.
+    - `GET /swagger/index.html` — UI de Swagger.
+
+    **Autenticación:**
+    - `POST /api/v1/auth/login` devuelve un *access token* (JWT, 15 min) y un
+      *refresh token* rotativo (30 días, guardado solo como hash SHA-256).
+    - El access token se envía en `Authorization: Bearer <token>`.
+    - Un token de invitado (scope `order:<id>`) solo permite
+      `GET /api/v1/orders/{id}` sobre su orden.
+
+    **RBAC a nivel de datos (RF-02):** el servidor limita cada consulta al
+    ámbito del rol autenticado; el cliente nunca puede solicitar otra tienda,
+    flota u orden sin recibir `403 FORBIDDEN_SCOPE` (o `404` si conviene no
+    revelar existencia).
+
+    **Errores:** todos los errores usan el sobre
+    `{ "error": { "code": "CODE", "message": "..." } }`.
+  license:
+    name: Propietario
+servers:
+  - url: http://localhost:8080
+    description: Desarrollo local (Docker Compose)
+tags:
+  - name: Auth
+    description: Registro, login, rotación de refresh tokens y tokens de invitado.
+  - name: Orders
+    description: Ciclo de vida de órdenes de logística (RF-05) y asignación de flota (RF-06).
+  - name: Ops
+    description: Operabilidad del servicio (F1).
+
+paths:
+  /healthz:
+    get:
+      tags: [Ops]
+      operationId: healthz
+      summary: Liveness del proceso
+      description: No toca la base de datos. Se usa como healthcheck del contenedor.
+      responses:
+        "200":
+          description: Proceso vivo.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    examples: ["ok"]
+
+  /readyz:
+    get:
+      tags: [Ops]
+      operationId: readyz
+      summary: Readiness con ping a PostgreSQL
+      responses:
+        "200":
+          description: Base de datos accesible.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    examples: ["ready"]
+        "503":
+          description: Sin base de datos disponible.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    examples: ["database unavailable"]
+
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Auto-registro de tienda o conductor
+      description: |
+        Solo admite `role` igual a `STORE` o `DRIVER`. La cuenta de proveedor
+        (`PROVIDER`) se crea por seed/administración (RF-01).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, role]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                full_name:
+                  type: string
+                role:
+                  type: string
+                  enum: [STORE, DRIVER]
+            examples:
+              tienda:
+                summary: Registro de tienda
+                value:
+                  email: tienda@example.com
+                  password: secreto123
+                  full_name: Tienda Central
+                  role: STORE
+      responses:
+        "201":
+          description: Usuario creado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Email ya registrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Autenticación y emisión del par de tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        "200":
+          description: Par de tokens emitido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: Usuario suspendido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshToken
+      summary: Rotación del refresh token
+      description: |
+        El refresh token presentado se **revoca** y se emite uno nuevo
+        (rotación, ADR-04). Reutilizar un token ya rotado devuelve `401`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: Nuevo par de tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Revoca el refresh token presentado
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "204":
+          description: Token revocado (idempotente).
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      operationId: currentUser
+      summary: Usuario autenticado
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Perfil del usuario (sin hash de contraseña).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/auth/guest-token:
+    post:
+      tags: [Auth]
+      operationId: issueGuestToken
+      summary: Emite un token de invitado con scope sobre una orden
+      description: |
+        Solo `STORE` (sobre su propia tienda) y `PROVIDER` (sobre su flota)
+        pueden emitirlo. El token resultante solo autoriza
+        `GET /api/v1/orders/{id}` de la orden indicada y expira en
+        `GUEST_TOKEN_TTL` (48 h por defecto).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id]
+              properties:
+                order_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Token de invitado emitido.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, expires_at, order_id]
+                properties:
+                  token:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+                  order_id:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/orders:
+    post:
+      tags: [Orders]
+      operationId: createOrder
+      summary: Crea una orden (rol STORE)
+      description: |
+        La orden queda siempre vinculada a la tienda del token autenticado:
+        enviar otro `store_id` devuelve `403`. `origin` y `destination` se
+        persisten como `geometry(Point,4326)` con PostGIS (ADR-09) y
+        `distance_meters` se calcula con `ST_DistanceSphere`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+            examples:
+              estandar:
+                summary: Orden urbana
+                value:
+                  external_ref: "PED-1001"
+                  origin: { lat: 4.7108, lon: -74.0721 }
+                  destination: { lat: 4.6578, lon: -74.0561 }
+                  destination_address: "Cra 7 # 72-40, Bogotá"
+      responses:
+        "201":
+          description: Orden creada (`Location` con la URL del recurso).
+          headers:
+            Location:
+              schema:
+                type: string
+              description: "`/api/v1/orders/{id}`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "`external_ref` duplicado (idempotencia)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+    get:
+      tags: [Orders]
+      operationId: listOrders
+      summary: Lista las órdenes visibles para el rol autenticado
+      description: |
+        El alcance se aplica en el servidor (RF-02):
+
+        - `STORE`: solo órdenes de su tienda.
+        - `DRIVER`: solo órdenes asignadas a él.
+        - `PROVIDER`: solo órdenes de vehículos de su flota.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/OrderStatus"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Página de órdenes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Order"
+                  total:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/orders/{id}:
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: Detalle de una orden
+      description: |
+        Acepta también tokens de invitado con `scope: order:<id>`; fuera de su
+        orden devuelven `403`.
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      responses:
+        "200":
+          description: Orden.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/orders/{id}/status:
+    patch:
+      tags: [Orders]
+      operationId: changeOrderStatus
+      summary: Transición de estado del ciclo de vida (RF-05)
+      description: |
+        Máquina de estados:
+
+        - `CREATED → IN_TRANSIT | CANCELLED`
+        - `IN_TRANSIT → DELIVERED | CANCELLED`
+        - `DELIVERED` y `CANCELLED` son estados finales.
+
+        Quien puede transicionar: la tienda dueña o el conductor asignado.
+        Cada cambio inserta un registro en `order_events` (append-only) en la
+        misma transacción. Una transición ilegal devuelve `409`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  $ref: "#/components/schemas/OrderStatus"
+      responses:
+        "200":
+          description: Orden actualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Transición no permitida por la máquina de estados.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/orders/{id}/assignment:
+    post:
+      tags: [Orders]
+      operationId: assignOrder
+      summary: Asigna vehículo y conductor a la orden (RF-06)
+      description: |
+        Rol `PROVIDER` únicamente. El vehículo debe pertenecer a su flota y el
+        conductor debe estar asignado a ese vehículo; si el vehículo es de otro
+        proveedor la respuesta es `403` (no se revela su existencia).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/OrderID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vehicle_id, driver_id]
+              properties:
+                vehicle_id:
+                  type: string
+                  format: uuid
+                driver_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Orden asignada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token JWT (HS256) de `POST /api/v1/auth/login`, o token de
+        invitado con scope `order:<id>` cuando el endpoint lo permite.
+
+  parameters:
+    OrderID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              examples: [UNAUTHENTICATED, FORBIDDEN_SCOPE, NOT_FOUND,
+                         ORDER_INVALID_TRANSITION, VALIDATION_ERROR]
+            message:
+              type: string
+
+    User:
+      type: object
+      required: [id, email, full_name, role]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+
+    Role:
+      type: string
+      enum: [PROVIDER, STORE, DRIVER]
+
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, expires_in, token_type]
+      properties:
+        access_token:
+          type: string
+          description: JWT de acceso (15 min por defecto).
+        refresh_token:
+          type: string
+          description: Refresh token rotativo (30 días, hash SHA-256 en BD).
+        expires_in:
+          type: integer
+          description: Segundos hasta la expiración del access token.
+        token_type:
+          type: string
+          examples: ["Bearer"]
+        user:
+          $ref: "#/components/schemas/User"
+
+    Point:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        lon:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+
+    OrderStatus:
+      type: string
+      enum: [CREATED, IN_TRANSIT, DELIVERED, CANCELLED]
+
+    CreateOrderRequest:
+      type: object
+      required: [external_ref, origin, destination]
+      properties:
+        external_ref:
+          type: string
+          description: Referencia externa única (clave de idempotencia).
+        store_id:
+          type: string
+          format: uuid
+          description: Opcional; debe coincidir con la tienda del token.
+        customer_id:
+          type: string
+          format: uuid
+          nullable: true
+        origin:
+          $ref: "#/components/schemas/Point"
+        destination:
+          $ref: "#/components/schemas/Point"
+        destination_address:
+          type: string
+
+    Order:
+      type: object
+      required: [id, external_ref, store_id, status, origin, destination, placed_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        external_ref:
+          type: string
+        store_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/OrderStatus"
+        assigned_vehicle_id:
+          type: string
+          format: uuid
+        assigned_driver_id:
+          type: string
+          format: uuid
+        origin:
+          $ref: "#/components/schemas/Point"
+        destination:
+          $ref: "#/components/schemas/Point"
+        destination_address:
+          type: string
+        distance_meters:
+          type: number
+          description: Distancia esférica calculada al crear (ST_DistanceSphere).
+        placed_at:
+          type: string
+          format: date-time
+        picked_up_at:
+          type: string
+          format: date-time
+        delivered_at:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: Cuerpo JSON malformado o entrada no legible.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthenticated:
+      description: Sin token, token inválido o expirado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Autenticado pero fuera de su rol o ámbito de datos.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Recurso inexistente.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValidationError:
+      description: Reglas de negocio o validación de entrada incumplidas.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Error inesperado del servidor.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

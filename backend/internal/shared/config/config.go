@@ -22,6 +22,13 @@ type Config struct {
 	LogLevel         string
 	LogFormat        string
 	ShutdownTimeout  time.Duration
+
+	// F2: autenticación JWT (RF-01, ADR-04). El secreto llega solo por entorno.
+	JWTSecret     string
+	JWTAccessTTL  time.Duration
+	JWTRefreshTTL time.Duration
+	GuestTokenTTL time.Duration
+	BcryptCost    int
 }
 
 // Load lee la configuración del entorno. Falla si falta DATABASE_URL,
@@ -45,8 +52,23 @@ func Load() (*Config, error) {
 	}
 	cfg.DBMaxConns = maxConns
 
+	cost, err := getInt32("BCRYPT_COST", 10)
+	if err != nil {
+		return nil, err
+	}
+	cfg.BcryptCost = int(cost)
+
+	// Autenticación (F2). SECRETOS: sin valor por defecto en código.
+	cfg.JWTSecret = os.Getenv("JWT_SECRET")
+	cfg.JWTAccessTTL = getDuration("JWT_ACCESS_TTL", 15*time.Minute)
+	cfg.JWTRefreshTTL = getDuration("JWT_REFRESH_TTL", 720*time.Hour) // 30 días
+	cfg.GuestTokenTTL = getDuration("GUEST_TOKEN_TTL", 48*time.Hour)
+
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
+	}
+	if len(cfg.JWTSecret) < 32 {
+		return nil, fmt.Errorf("config: JWT_SECRET es obligatoria y debe tener al menos 32 caracteres")
 	}
 	return cfg, nil
 }
