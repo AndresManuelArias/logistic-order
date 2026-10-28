@@ -206,9 +206,27 @@ make seed     # idempotente: si ya existen los datos, no hace nada
 
 Crea 10 órdenes con `origin`/`destination` reales de Bogotá (PostGIS) en
 distintos estados (`CREATED`, `IN_TRANSIT`, `DELIVERED`, `CANCELLED`) y sus
-eventos de historial. Además carga **24 puntos de telemetría** (8 por vehículo)
-para que `latest`, `track` y el WebSocket tengan datos en la demo; si un
-vehículo ya tiene muestras, no se duplican.
+eventos de historial. Además carga una **traza demo de 30 puntos por vehículo**
+(una muestra por minuto durante los últimos 30 minutos) para que `latest`,
+`track` y el WebSocket tengan datos que dibujar; si el vehículo ya tiene una
+traza reciente, no se duplica.
+
+```bash
+# Vehículo demo + traza de ejemplo (mismos datos que pinta el portal)
+VEHICLE_ID=$(docker compose exec -T db psql -U tiendas -d tiendas -tA -c \
+  "SELECT v.id FROM app.vehicles v JOIN app.users u ON u.id = v.provider_id
+   WHERE u.email = 'proveedor@tiendas.dev' ORDER BY v.plate LIMIT 1")
+FROM=$(date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)
+TO=$(date -u -d '+1 minute' +%Y-%m-%dT%H:%M:%SZ)
+
+curl -s "http://localhost:8080/api/v1/vehicles/$VEHICLE_ID/track?from=$FROM&to=$TO&limit=100" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+Respuesta (recortada): `{"vehicle_id":"…","from":"…","to":"…","count":30,`
+`"points":[{"vehicle_id":"…","device_seq":100,"lat":4.6483,"lon":-74.0720,`
+`"speed_kph":18,"heading":45,"source":"DEVICE","time":"…","received_at":"…"}, …]}`.
+Los puntos se devuelven del más reciente al más antiguo.
 
 ## Comandos
 

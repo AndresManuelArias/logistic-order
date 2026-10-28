@@ -233,9 +233,14 @@ func Run(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*Result, er
 	return res, nil
 }
 
+// demoTrajectoryPoints es el tamaño de la traza demo por vehículo: 30 muestras,
+// una por minuto, para que `track` tenga una ruta continua que dibujar.
+const demoTrajectoryPoints = 30
+
 // seedTelemetry inserta una traza demo para cada vehículo del proveedor seed
-// que aún no tenga muestras. Es idempotente: si el vehículo ya tiene
-// telemetría se omite, de modo que `make seed` nunca duplica ni reescribe.
+// que aún no tenga muestras recientes. Es idempotente: si el vehículo ya tiene
+// una traza demo (>= demoTrajectoryPoints en las últimas 2 h) se omite, de modo
+// que `make seed` nunca duplica ni reescribe.
 func seedTelemetry(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (int, error) {
 	var providerID string
 	err := pool.QueryRow(ctx,
@@ -281,17 +286,20 @@ func seedTelemetry(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (i
 
 	total := 0
 	for i, v := range vehicles {
-		var has bool
+		// ¿Ya existe una traza demo reciente? (evita duplicar en cada `make seed`).
+		var recent int
 		if err := pool.QueryRow(ctx, `
-			SELECT EXISTS (SELECT 1 FROM telemetry.points WHERE vehicle_id = $1::uuid)`,
-			v.id).Scan(&has); err != nil {
+			SELECT count(*) FROM telemetry.points
+			WHERE vehicle_id = $1::uuid AND time >= now() - interval '2 hours'`,
+			v.id).Scan(&recent); err != nil {
 			return total, fmt.Errorf("seed telemetría: verificando %s: %w", v.plate, err)
 		}
-		if has {
+		if recent >= demoTrajectoryPoints {
 			continue
 		}
 
-		// Ruta corta y determinista (8 muestras cada 3 min) alrededor de Bogotá.
+		// Traza determinista de 30 min (1 muestra/min) con rumbo noreste y
+		// pequeñas variaciones de velocidad, alrededor de Bogotá.
 		lat := 4.6480 + float64(i)*0.0120
 		lon := -74.0720 + float64(i)*0.0090
 		var order any
@@ -303,19 +311,25 @@ func seedTelemetry(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (i
 			INSERT INTO telemetry.points
 			    (time, vehicle_id, device_seq, order_id, location,
 			     speed_kph, accuracy_m, heading, source)
-			SELECT now() - (g * interval '3 minutes'),
-			       $1::uuid, g + 1, $2::uuid,
-			       ST_SetSRID(ST_MakePoint($3 + g * 0.0007, $4 + g * 0.0005), 4326),
-			       24 + g * 2, 6.5, 45, 'DEVICE'
-			FROM generate_series(0, 7) AS g
-			ON CONFLICT DO NOTHING`, v.id, order, lon, lat)
+			SELECT date_trunc('minute', now()) - (g * interval '1 minute'),
+			       $1::uuid, 100 + g, $2::uuid,
+			       ST_SetSRID(ST_MakePoint(
+			           $3 + g * 0.00045 + sin(g::float8 / 3.0) * 0.00040,
+			           $4 + g * 0.00030 + cos(g::float8 / 3.0) * 0.00030), 4326),
+			       18 + (g % 7) * 3.5,
+			       5.5,
+			       (45 + g * 3) % 360,
+			       'DEVICE'
+			FROM generate_series(0, $5) AS g
+			ON CONFLICT DO NOTHING`, v.id, order, lon, lat, demoTrajectoryPoints-1)
 		if err != nil {
 			return total, fmt.Errorf("seed telemetría: %s: %w", v.plate, err)
 		}
 		total += int(tag.RowsAffected())
 	}
 
-	log.Info("seed: telemetría demo lista", "inserted_points", total)
+	log.Info("seed: telemetría demo lista",
+		"inserted_points", total, "points_per_vehicle", demoTrajectoryPoints)
 	return total, nil
 }
 

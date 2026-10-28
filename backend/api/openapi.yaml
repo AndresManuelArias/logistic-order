@@ -783,16 +783,30 @@ paths:
         - $ref: "#/components/parameters/VehicleID"
         - name: from
           in: query
+          description: |
+            Inicio del rango en formato RFC3339 (UTC).
+            Escríbelo así: `AAAA-MM-DDTHH:mm:ssZ`.
+            Ejemplo: `2026-10-28T12:00:00Z`.
           required: true
+          example: "2026-10-28T12:00:00Z"
           schema:
             type: string
             format: date-time
+            pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$'
+            example: "2026-10-28T12:00:00Z"
         - name: to
           in: query
+          description: |
+            Fin del rango en formato RFC3339 (UTC).
+            Escríbelo así: `AAAA-MM-DDTHH:mm:ssZ`.
+            Ejemplo: `2026-10-28T13:00:00Z`.
           required: true
+          example: "2026-10-28T13:00:00Z"
           schema:
             type: string
             format: date-time
+            pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$'
+            example: "2026-10-28T13:00:00Z"
         - name: limit
           in: query
           required: false
@@ -808,6 +822,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TrackResponse"
+              example:
+                vehicle_id: "e1cf4001-75f0-45fa-94e4-484b2335213f"
+                from: "2026-10-28T17:00:00Z"
+                to: "2026-10-28T19:20:00Z"
+                count: 3
+                points:
+                  - vehicle_id: "e1cf4001-75f0-45fa-94e4-484b2335213f"
+                    order_id: "64be6c96-a444-43c3-ae1e-60e3f2a05bf9"
+                    device_seq: 100
+                    lat: 4.6483
+                    lon: -74.072
+                    speed_kph: 18
+                    accuracy_m: 5.5
+                    heading: 45
+                    source: "DEVICE"
+                    time: "2026-10-28T19:15:00Z"
+                    received_at: "2026-10-28T19:15:13.742092Z"
+                  - vehicle_id: "e1cf4001-75f0-45fa-94e4-484b2335213f"
+                    order_id: "64be6c96-a444-43c3-ae1e-60e3f2a05bf9"
+                    device_seq: 101
+                    lat: 4.648583
+                    lon: -74.071419
+                    speed_kph: 21.5
+                    accuracy_m: 5.5
+                    heading: 48
+                    source: "DEVICE"
+                    time: "2026-10-28T19:14:00Z"
+                    received_at: "2026-10-28T19:15:13.742092Z"
+                  - vehicle_id: "e1cf4001-75f0-45fa-94e4-484b2335213f"
+                    order_id: "64be6c96-a444-43c3-ae1e-60e3f2a05bf9"
+                    device_seq: 102
+                    lat: 4.648836
+                    lon: -74.070853
+                    speed_kph: 25
+                    accuracy_m: 5.5
+                    heading: 51
+                    source: "DEVICE"
+                    time: "2026-10-28T19:13:00Z"
+                    received_at: "2026-10-28T19:15:13.742092Z"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":

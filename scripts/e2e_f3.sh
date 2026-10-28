@@ -68,7 +68,10 @@ SQL
 DRV1_VEH=$(psqlq "SELECT d.vehicle_id::text FROM app.drivers d JOIN app.users u ON u.id = d.user_id WHERE u.email='conductor1@tiendas.dev'")
 DRV2_VEH=$(psqlq "SELECT d.vehicle_id::text FROM app.drivers d JOIN app.users u ON u.id = d.user_id WHERE u.email='conductor2@tiendas.dev'")
 FOREIGN_VEH=$(psqlq "SELECT id::text FROM app.vehicles WHERE plate='F3X999'")
-ORDER_DRV1=$(psqlq "SELECT id::text FROM app.orders WHERE assigned_vehicle_id='$DRV1_VEH'::uuid AND status='IN_TRANSIT' ORDER BY placed_at DESC LIMIT 1")
+# Prefiere una orden en curso; si el flujo F2 ya la entregó, sirve cualquier
+# orden del vehículo (el canal `order:<id>` y el token de invitado no dependen
+# del estado de la orden).
+ORDER_DRV1=$(psqlq "SELECT id::text FROM app.orders WHERE assigned_vehicle_id='$DRV1_VEH'::uuid ORDER BY (status='IN_TRANSIT') DESC, placed_at DESC LIMIT 1")
 ORDER_OTHER=$(psqlq "SELECT id::text FROM app.orders WHERE assigned_vehicle_id='$DRV2_VEH'::uuid ORDER BY placed_at DESC LIMIT 1")
 [ -n "$DRV1_VEH" ] && [ -n "$DRV2_VEH" ] && [ -n "$FOREIGN_VEH" ] && [ -n "$ORDER_DRV1" ] && [ -n "$ORDER_OTHER" ] \
   && say "OK   datos base (vehículos y órdenes)" \
@@ -211,7 +214,15 @@ chk "track rango > 7 días -> 422" 422 \
   "$(get "/api/v1/vehicles/$DRV1_VEH/track?from=2026-01-01T00:00:00Z&to=2026-02-01T00:00:00Z" "$J/t_big.json" "$DRV1_AT")"
 chk "track DRIVER su vehículo -> 200" 200 \
   "$(get "/api/v1/vehicles/$DRV1_VEH/track?from=$FROM&to=$TO&limit=50" "$J/t_ok.json" "$DRV1_AT")"
-has "track devuelve puntos" "$J/t_ok.json" '"count":'
+TRACK_COUNT=$(grep -o '"count":[0-9]*' "$J/t_ok.json" | head -1 | cut -d: -f2)
+if [ -n "$TRACK_COUNT" ] && [ "$TRACK_COUNT" -gt 0 ]; then
+  say "OK   track entrega datos -> $TRACK_COUNT puntos"
+else
+  say "FAIL track sin datos -> $(head -c 200 "$J/t_ok.json")"; FAIL=1
+fi
+has "track punto con vehicle_id" "$J/t_ok.json" '"vehicle_id"'
+has "track punto con lat/lon" "$J/t_ok.json" '"lat"'
+has "track punto con timestamp" "$J/t_ok.json" '"time"'
 chk "track DRIVER vehículo ajeno -> 403" 403 \
   "$(get "/api/v1/vehicles/$DRV2_VEH/track?from=$FROM&to=$TO" "$J/t_deny.json" "$DRV1_AT")"
 

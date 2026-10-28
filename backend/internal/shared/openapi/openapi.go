@@ -155,9 +155,12 @@ fetch('/swagger/openapi.json').then(r=>r.json()).then(spec=>{
         const ref=p.$ref?refName(p.$ref):null;
         const q=ref?((spec.components.parameters||{})[ref]||{}):p;
         const sch=q.schema||{};
-        html+='<tr><td><code>'+esc(q.name||ref||'')+'</code></td><td>'+esc(q.in||'')+'</td><td>'+ 
+        const example=q.example!==undefined?q.example:sch.example;
+        const description=q.description?'<br><small>'+esc(q.description.replace(/\n/g,' ').replace(/\x60([^\x60]+)\x60/g,'$1'))+'</small>':'';
+        const placeholder=example!==undefined?' placeholder="'+esc(String(example))+'"':'';
+        html+='<tr><td><code>'+esc(q.name||ref||'')+'</code>'+description+'</td><td>'+esc(q.in||'')+'</td><td>'+ 
           (sch.type||(sch.$ref?refName(sch.$ref):'')||'')+(sch.enum?' ['+sch.enum.join(' | ')+']':'')+
-          '</td><td>'+ (q.required?'sí':'no')+'</td><td><input class="param-input" data-param-name="'+esc(q.name||ref||'')+'" data-param-in="'+esc(q.in||'')+'"'+(q.required?' required':'')+'></td></tr>';
+          '</td><td>'+ (q.required?'sí':'no')+'</td><td><input class="param-input" data-param-name="'+esc(q.name||ref||'')+'" data-param-in="'+esc(q.in||'')+'"'+placeholder+(q.required?' required':'')+'></td></tr>';
       });
       html+='</table></div>';
     }
