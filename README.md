@@ -109,6 +109,32 @@ make psql      # shell psql en la base de datos
 make clean     # baja el stack y BORRA los volúmenes locales
 ```
 
+### Levantar solo la base de datos
+
+Para desarrollo o pruebas que no requieren el backend completo:
+
+```bash
+docker compose up db -d       # levanta solo PostgreSQL + TimescaleDB + PostGIS
+docker compose logs db -f     # ver logs de la base de datos
+docker compose exec db pg_isready   # verificar que la BD está healthy
+```
+
+**Verificación:**
+
+```bash
+docker compose ps
+# NAME                 IMAGE                           STATUS
+# tiendas-track-db-1   timescale/timescaledb-ha:pg16   Up About a minute (healthy)
+
+docker compose exec db psql -U ${POSTGRES_USER:-tiendas} -d ${POSTGRES_DB:-tiendas} -c "\\dt"
+# Lista las tablas si la BD está lista
+```
+
+> La base de datos expone el puerto 5432 por defecto. Conéctate con:
+> ```bash
+> psql "postgres://tiendas:tiendas_dev@localhost:5432/tiendas?sslmode=disable"
+> ```
+
 Pruebas end-to-end de F2 (requiere el stack levantado):
 
 ```bash
