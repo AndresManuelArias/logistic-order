@@ -162,6 +162,24 @@ curl -s -X POST http://localhost:8080/api/v1/telemetry/bulk \
   `CB_TIMEOUT`): si la BD está degradada responden `503 CIRCUIT_OPEN` con
   `Retry-After`.
 
+### Simular ubicaciones en tiempo real (`WebSocket`)
+
+Para enviar una ruta simulada del vehículo `ABC123` como proveedor y observar
+los eventos en el portal abierto en `http://localhost:3000/proveedor`:
+
+```bash
+./scripts/simulate_vehicle_telemetry.sh
+```
+
+Por defecto envía 12 posiciones cada 2 segundos. Se pueden ajustar con variables
+de entorno, por ejemplo:
+
+```bash
+COUNT=30 INTERVAL_SECONDS=1 PLATE=ABC123 ./scripts/simulate_vehicle_telemetry.sh
+```
+
+También admite `BASE_URL`, `EMAIL` y `PASSWORD` para otros entornos o credenciales.
+
 ### Ejemplo que funciona: traza de un vehículo (`track`)
 
 Copia y pega este bloque en la raíz del repo (stack levantado con `make up` y
