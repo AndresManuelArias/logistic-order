@@ -40,6 +40,18 @@ make run-local         # levanta la base de datos y ejecuta go run ./cmd/server
 
 El backend quedará disponible en `http://localhost:8080`. Para iniciar solo la base de datos, ejecuta `make db-up`.
 
+### Aplicativo web local
+
+Para arrancar únicamente el portal web en modo desarrollo:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+El aplicativo estará disponible en `http://localhost:3000`.
+
 Servicios:
 
 | Servicio | URL |
