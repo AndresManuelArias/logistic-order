@@ -346,22 +346,75 @@ paths:
     get:
       tags: [Stores]
       operationId: listStores
-      summary: Lista las tiendas disponibles (rol PROVIDER)
+      summary: Lista paginada de tiendas disponibles
+      description: |
+        Devuelve todas las tiendas registradas en la plataforma.
+        Accesible para cualquier usuario autenticado (`PROVIDER`, `STORE`,
+        `DRIVER`). Los tokens de invitado reciben `403`.
+
+        Soporta búsqueda por nombre parcial (case-insensitive) y paginación
+        mediante `limit` / `offset`.
       security:
         - bearerAuth: []
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: Filtro por nombre parcial (case-insensitive).
+          schema:
+            type: string
+            example: "Esquina"
+        - name: limit
+          in: query
+          required: false
+          description: Número máximo de resultados por página (1–200).
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          required: false
+          description: Desplazamiento para la paginación.
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
       responses:
         "200":
-          description: Tiendas disponibles para crear órdenes.
+          description: Página de tiendas.
           content:
             application/json:
               schema:
-                type: array
+                $ref: "#/components/schemas/StoreListResponse"
+              example:
                 items:
-                  $ref: "#/components/schemas/Store"
+                  - id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    name: "Tienda La Esquina"
+                    owner_user_id: "f1e2d3c4-b5a6-7890-abcd-ef1234567890"
+                    address: "Bogotá D.C."
+                    lat: 4.655
+                    lon: -74.0632
+                    created_at: "2024-01-01T00:00:00Z"
+                  - id: "b2c3d4e5-f6a7-8901-bcde-f01234567891"
+                    name: "Tienda El Mercado"
+                    owner_user_id: "e2d3c4b5-a6f7-8901-bcde-f01234567891"
+                    address: "Bogotá D.C."
+                    lat: 4.627
+                    lon: -74.083
+                    created_at: "2024-01-02T00:00:00Z"
+                total: 2
+                limit: 50
+                offset: 0
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       tags: [Stores]
       operationId: createStore
@@ -832,6 +885,55 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /api/v1/drivers:
+    get:
+      tags: [Vehicles]
+      operationId: listDriversByVehicle
+      summary: Conductores asignados a un vehículo (rol PROVIDER)
+      description: |
+        Devuelve los conductores (`app.drivers`) asignados al vehículo
+        indicado. Solo el `PROVIDER` dueño de ese vehículo puede consultarlos.
+
+        El `id` de cada conductor es el valor que debe usarse como `driver_id`
+        en `POST /api/v1/orders/{id}/assignment`. Es el `app.drivers.id`
+        (no el `app.users.id`).
+
+        Si el `vehicle_id` no pertenece a la flota del proveedor autenticado,
+        la respuesta es `403` (no se revela si el vehículo existe).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: vehicle_id
+          in: query
+          required: true
+          description: UUID del vehículo cuya lista de conductores se consulta.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Conductores asignados al vehículo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverListResponse"
+              example:
+                items:
+                  - id: "c3d4e5f6-a7b8-9012-cdef-012345678902"
+                    user_id: "d4e5f6a7-b8c9-0123-def0-123456789003"
+                    full_name: "Carlos Ramírez"
+                    license_number: "LIC-100000"
+                    vehicle_id: "e1cf4001-75f0-45fa-94e4-484b2335213f"
+                total: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/vehicles/{id}/latest:
     get:
       tags: [Telemetry]
@@ -1229,6 +1331,62 @@ components:
         created_at:
           type: string
           format: date-time
+
+    StoreListResponse:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Store"
+        total:
+          type: integer
+          description: Total de tiendas antes de paginar.
+        limit:
+          type: integer
+          description: Límite aplicado en esta página.
+        offset:
+          type: integer
+          description: Desplazamiento aplicado en esta página.
+
+    Driver:
+      type: object
+      required: [id, user_id, full_name, license_number, vehicle_id]
+      description: Conductor asignado a un vehículo de la flota.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: |
+            `app.drivers.id` — es el identificador que se usa en
+            `POST /api/v1/orders/{id}/assignment` como `driver_id`.
+        user_id:
+          type: string
+          format: uuid
+          description: Usuario con rol `DRIVER` vinculado a este registro.
+        full_name:
+          type: string
+          description: Nombre completo del conductor.
+        license_number:
+          type: string
+          description: Número de licencia de conducción.
+        vehicle_id:
+          type: string
+          format: uuid
+          description: Vehículo al que está asignado el conductor.
+
+    DriverListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Driver"
+        total:
+          type: integer
+          description: Total de conductores asignados al vehículo.
 
     OrderStatus:
       type: string

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"tiendas-track/backend/internal/shared/httperr"
 	"tiendas-track/backend/internal/shared/middleware"
@@ -26,11 +27,12 @@ func NewHandler(uc *usecase.StoresUseCase, log *slog.Logger) *Handler {
 	return &Handler{uc: uc, log: log}
 }
 
-// RegisterRoutes monta /api/v1/stores/*. Ambos endpoints requieren rol STORE.
+// RegisterRoutes monta /api/v1/stores/*.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler, roles func(...string) func(http.Handler) http.Handler) {
 	mux.Handle("POST /api/v1/stores", auth(roles("STORE")(http.HandlerFunc(h.Create))))
 	mux.Handle("GET /api/v1/stores/me", auth(roles("STORE")(http.HandlerFunc(h.Me))))
-	mux.Handle("GET /api/v1/stores", auth(roles("PROVIDER")(http.HandlerFunc(h.List))))
+	// GET /api/v1/stores — disponible para cualquier rol autenticado (no guest).
+	mux.Handle("GET /api/v1/stores", auth(http.HandlerFunc(h.List)))
 }
 
 type storeRequest struct {
@@ -90,25 +92,79 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(toStoreResponse(s))
+	w.Header().Set("Location", "/api/v1/stores/"+s.ID)
+	writeJSON(w, http.StatusCreated, toStoreResponse(s))
 }
 
-// List maneja GET /api/v1/stores para proveedores.
+// List maneja GET /api/v1/stores?name=&limit=&offset=
+// Devuelve la lista paginada de tiendas disponibles.
+// Accesible para cualquier rol autenticado (PROVIDER, STORE, DRIVER).
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	p, _ := middleware.PrincipalFrom(r.Context())
-	stores, err := h.uc.List(r.Context(), p)
-	if err != nil {
-		h.mapError(w, r.Header.Get("X-Correlation-ID"), "List", err)
+	traceID, _ := tracing.CorrelationIDFromContext(r.Context())
+	p, ok := middleware.PrincipalFrom(r.Context())
+	if !ok {
+		h.log.Error("List: no autenticado", "trace_id", traceID)
+		httperr.Unauthenticated(w, "no autenticado")
 		return
 	}
-	response := make([]storeResponse, 0, len(stores))
-	for i := range stores {
-		response = append(response, toStoreResponse(&stores[i]))
+
+	q := r.URL.Query()
+	name := q.Get("name")
+
+	limit := 50
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 || n > 200 {
+			httperr.BadRequest(w, "INVALID_LIMIT", "limit debe ser un entero entre 1 y 200")
+			return
+		}
+		limit = n
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+
+	offset := 0
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			httperr.BadRequest(w, "INVALID_OFFSET", "offset debe ser un entero no negativo")
+			return
+		}
+		offset = n
+	}
+
+	h.log.Info("List: consultando tiendas",
+		"trace_id", traceID,
+		"name", name,
+		"limit", limit,
+		"offset", offset,
+	)
+
+	stores, total, err := h.uc.List(r.Context(), p, usecase.ListInput{
+		Name:   name,
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		h.mapError(w, traceID, "List", err)
+		return
+	}
+
+	items := make([]storeResponse, 0, len(stores))
+	for i := range stores {
+		items = append(items, toStoreResponse(&stores[i]))
+	}
+
+	h.log.Info("List: respondiendo",
+		"trace_id", traceID,
+		"count", len(items),
+		"total", total,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":  items,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
 }
 
 // Me maneja GET /api/v1/stores/me.
@@ -122,8 +178,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(toStoreResponse(s))
+	writeJSON(w, http.StatusOK, toStoreResponse(s))
 }
 
 // mapError traduce errores de dominio a respuestas HTTP.
@@ -135,7 +190,7 @@ func (h *Handler) mapError(w http.ResponseWriter, traceID, op string, err error)
 	)
 	switch {
 	case errors.Is(err, domain.ErrForbiddenScope):
-		httperr.Forbidden(w, "acceso denegado: se requiere rol STORE")
+		httperr.Forbidden(w, "acceso denegado: se requiere autenticación")
 	case errors.Is(err, domain.ErrAlreadyExists):
 		httperr.Conflict(w, "store_already_exists", "el usuario ya tiene una tienda registrada")
 	case errors.Is(err, domain.ErrNotFound):
@@ -145,4 +200,10 @@ func (h *Handler) mapError(w http.ResponseWriter, traceID, op string, err error)
 	default:
 		httperr.Internal(w)
 	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }

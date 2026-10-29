@@ -89,12 +89,51 @@ func (uc *StoresUseCase) Create(ctx context.Context, p authz.Principal, in Creat
 	return s, nil
 }
 
-// Me devuelve la tienda del usuario autenticado (ErrNotFound si aún no existe).
-func (uc *StoresUseCase) List(ctx context.Context, p authz.Principal) ([]domain.Store, error) {
-	if p.IsGuest() || !p.HasRole(authz.RoleProvider) {
-		return nil, domain.ErrForbiddenScope
+// ListInput son los parámetros de la consulta de tiendas disponibles.
+type ListInput struct {
+	Name   string
+	Limit  int
+	Offset int
+}
+
+// List devuelve la lista paginada de tiendas disponibles.
+// Cualquier usuario autenticado puede consultarla (PROVIDER, STORE, DRIVER).
+// Los invitados (guest tokens) no tienen acceso.
+func (uc *StoresUseCase) List(ctx context.Context, p authz.Principal, in ListInput) ([]domain.Store, int, error) {
+	traceID, _ := tracing.CorrelationIDFromContext(ctx)
+	uc.log.Info("List: consultando tiendas",
+		"trace_id", traceID,
+		"user_id", p.UserID,
+		"role", p.Role,
+		"name_filter", in.Name,
+		"limit", in.Limit,
+		"offset", in.Offset,
+	)
+
+	if p.IsGuest() {
+		uc.log.Error("List: invitado sin acceso a listado de tiendas", "trace_id", traceID)
+		return nil, 0, domain.ErrForbiddenScope
 	}
-	return uc.stores.List(ctx, 200)
+
+	stores, total, err := uc.stores.List(ctx, domain.ListFilter{
+		Name:   in.Name,
+		Limit:  in.Limit,
+		Offset: in.Offset,
+	})
+	if err != nil {
+		uc.log.Error("List: error consultando tiendas",
+			"trace_id", traceID,
+			"error", err.Error(),
+		)
+		return nil, 0, err
+	}
+
+	uc.log.Info("List: consulta completada",
+		"trace_id", traceID,
+		"total", total,
+		"count", len(stores),
+	)
+	return stores, total, nil
 }
 
 func (uc *StoresUseCase) Me(ctx context.Context, p authz.Principal) (*domain.Store, error) {

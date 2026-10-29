@@ -3,9 +3,9 @@
 > **Documento maestro para agentes de IA.**
 > Cualquier agente que vaya a implementar, revisar o probar una parte del sistema **debe leer este documento completo antes de empezar** y respetar las decisiones aquí registradas. Si encuentra una contradicción con otro documento, este plan prevalece y debe escalarse al rol `architect`.
 
-- **Versión:** 1.0
-- **Fecha:** 2026-10-27
-- **Estado:** Propuesta pendiente de aprobación del usuario
+- **Versión:** 1.1
+- **Fecha:** 2026-10-29
+- **Estado:** F1–F6 implementadas; validación global pendiente de completar un cambio en curso en `stores`
 - **Fuentes:** `doc/requeriment/*`, `doc/arquitectura/*` (monolito modular, microservicios, UML casos de uso, estructuras de carpetas)
 
 ---
@@ -275,7 +275,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | F3 | ✅ **Completada (2026-10-28)** | Módulo `telemetry` (ingesta individual y bulk idempotente por `Idempotency-Key` + `sync_receipts`, `latest`/`track` con RBAC y circuit breaker); bus interno `shared/eventbus` (Go channels, descarte contabilizado); hub `shared/websocket` con suscripciones validadas, revalidación de concesiones (`WS_GRANT_TTL`), cierre por expiración de token (`4401`) y por consumidor lento (`1008`); `POST /telemetry/points|bulk`, `GET /vehicles/{id}/latest|track` y `GET /ws` documentados en OpenAPI; seed con 90 puntos demo (30 por vehículo, validado con `curl` sobre `track`); `go test -race ./...` OK (16 paquetes) y e2e `scripts/e2e_f3.sh` 63/63 casos OK con latencia WS de **4,3 ms** (RNF-04 < 500 ms) |
 | F4 | ✅ **Completada (2026-10-28)** | Monorepo `web/` con `@tiendas/tracking-core` (cliente OpenAPI, refresh single-flight, `useTracking` con backoff/dedupe) y `@tiendas/tracking-ui` (mapa SVG accesible, tarjeta de orden, progreso); portal Next.js 16 con login, `/proveedor`, `/tienda` (dual), `/conductor` y `/seguimiento/{id}#t=…`; BFF same-origin con refresh en cookie `httpOnly`; `GET /api/v1/vehicles` para los paneles; 58 pruebas, typecheck/lint/build OK. App móvil Expo SDK 54 + RN 0.81 + WatermelonDB con GPS en segundo plano, cola write-ahead idempotente (`Idempotency-Key`), transiciones reconciliadas por `GET`, POD local y UI de conductor; 99 pruebas, typecheck y bundle Metro OK; idempotencia validada contra el backend real. Compilación nativa, GPS y permisos reales no validados por falta de emulador/Android SDK |
 | F5 | ✅ **Completada (2026-10-29)** | Módulo `aiagent` (`domain`/`usecase`/`infrastructure`/`delivery`) con catálogo cerrado de 4 herramientas y SQL scopeado por rol; adaptador LLM HTTP compatible con OpenAI (sin SDK, sirve OpenAI/Groq/Ollama/vLLM); `POST /api/v1/ai/query` con validación, bucle de tool-calling acotado (`AI_MAX_STEPS`), timeout global y circuit breaker dedicado (`ai-llm`); auditoría ampliada en `app.ai_query_log` (migración `0007`: estado, error, respuesta, modelo y `tools JSONB`); sin `AI_API_KEY` → `503 AI_NOT_CONFIGURED`; contrato OpenAPI + panel del portal integrados; `go test ./...` OK (incluye orquestador, herramientas, adaptador LLM, handler, config y contrato) y 58 pruebas web OK. Prueba con proveedor real pendiente: no hay API key en el entorno |
-| F6 | ⬜ Pendiente | — |
+| F6 | 🟡 **Implementada (2026-10-29)** — validación global bloqueada | k6 real (100 VUs + 20 WS): p95 ingesta 11,8 ms, p95 WS 11 ms, 0 5xx, 105 duplicados, 23 `422`; rate limiting con `429`/`Retry-After` validado E2E; Terraform `fmt`/`validate`/`plan` offline (36 recursos); Spectral sin errores; `govulncheck` 0; CI con 8 jobs, Fastlane y bundle Expo; auditoría `doc/seguridad/auditoria_f6.md`. **Pendiente:** `go vet ./...`/`go test ./...` globales fallan por un cambio ajeno en curso en `stores.List`; `apply` AWS y build nativo iOS no ejecutables en este entorno |
 
 > **Orden estricto:** una fase no arranca hasta que sus dependencias estén entregadas. Cada tarea indica el **agente responsable** (definidos en `.opencode/agents/`). El frontend y el móvil pueden **iniciar en paralelo** contra contratos mock (OpenAPI de F2).
 
@@ -366,7 +366,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - **Pruebas:** unitarias del orquestador (herramienta correcta, defaults, argumentos inválidos, herramienta desconocida, error de repositorio, error de proveedor, circuito abierto, máximo de pasos, auditoría en éxito/fallo), del registro, del adaptador LLM (`httptest`), del handler (200/401/403/422/502/503/504) y de `ETAMinutes`; contrato OpenAPI ampliado; `go vet ./...` y `go test ./...` en verde; 58 pruebas web OK.
 - **Límites/supuestos:** sin fallback determinista sin LLM (se prioriza no simular respuestas); `area` = fragmento de nombre/dirección de tienda; ETA = distancia en línea recta / velocidad (última muestra o 30 km/h); «retrasada» = pendiente > `hours` (def. 24). No hay rate limiting por usuario (se anota para F6).
 
-### F6 — Pruebas de carga, IaC, CI/CD y documentación
+### F6 — Pruebas de carga, IaC, CI/CD y documentación 🟡 IMPLEMENTADA (2026-10-29)
 - **Objetivo:** RNF-06, RNF-08, RNF-09 + documentación final.
 - **Depende de:** F3–F5.
 - **Agentes:** `qa`, `devops`, `security`.
@@ -412,9 +412,18 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   en código llamado**. `npm audit` web: 0; móvil: 15 residuales de `postcss`
   transitivo de Expo (fix incompatible). README raíz con la sección
   **Auditoría del uso de la IA** (dos casos verificables).
-- **Validación local:** `gofmt`, `go vet ./...`, `go test ./...`,
-  `go test -race` de paquetes tocados, 58 pruebas web, 99 pruebas móvil,
-  `docker compose config`, `docker build` del backend, Spectral y Terraform.
+- **Validación local (antes del cambio ajeno):** `gofmt`, `go vet ./...`,
+  `go test ./...` y `go test -race` de los paquetes tocados estaban en verde;
+  además, 58 pruebas web, 99 pruebas móvil, typecheck/lint/build del portal,
+  bundle Expo Android, `docker compose config`, builds Docker de backend y web,
+  Spectral y Terraform correctos.
+- **Bloqueo de validación (2026-10-29):** el árbol de trabajo contiene cambios
+  en curso ajenos a F6 en `backend/internal/stores`: `List` recibe
+  `domain.ListFilter`, pero `StoresUseCase.List` llama con `200`. Por eso
+  `go vet ./...`, `go test ./...` y el job `backend` del CI fallan en
+  `stores.go:97`. Los paquetes de F6 (`shared/ratelimit`, `shared/openapi`)
+  compilan y pasan sus pruebas de forma aislada. **F6 no se marcará como verde
+  hasta completar ese cambio.**
 - **Límites:** no hay credenciales AWS (no se ejecutó `apply` ni un plan real),
   ni macOS/Xcode (no se generó binario iOS), ni `AI_API_KEY` real. El pipeline
   remoto no se ejecutó porque el repositorio no tiene remoto configurado; los
@@ -431,7 +440,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | F3 | RF-03, RF-04 | RNF-03, RNF-04 | backend-go, security |
 | F4 | RF-02 (UI), RF-07, RF-08, RF-09 | RNF-02 | frontend-react, mobile-react-native |
 | F5 | RF-10 | RNF-05 | backend-go, architect |
-| F6 | — | RNF-06, RNF-08, RNF-09 | qa, devops, security |
+| F6 | — | RNF-06, RNF-08, RNF-09 (+ validación de RNF-04) | qa, devops, security |
 
 ---
 
@@ -471,6 +480,12 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - Web: `eslint` + `tsc`, tests de `tracking-core`, una prueba E2E del flujo principal por vista.
 - Móvil: pruebas unitarias del `SyncQueueManager` (incluye reintento con duplicados).
 - Carga: k6 en F6 con los umbrales definidos.
+- Contrato: `scripts/contract/check_openapi.sh` (pruebas Go + Spectral).
+- IaC: `terraform fmt -check`, `validate` y `plan -var offline_plan=true`.
+- **Estado (2026-10-29):** la suite global está bloqueada por el cambio en curso
+  de `stores` (R13). Hasta completarlo, usar `make contract`, `make iac-validate`,
+  las pruebas web/móvil y las pruebas aisladas de `shared/ratelimit` y
+  `shared/openapi` como evidencia parcial.
 
 ---
 
@@ -479,7 +494,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | # | Tema | Tipo | Nota |
 |---|---|---|---|
 | R1 | `estructura_carpeta_portal_web_multi_rol.md` está duplicado con la estructura móvil | **Doc defectuoso** | Corregir o reemplazar por la §4.2 |
-| R2 | Spec OpenAPI desincronizándose de la implementación | **Mitigado en F2/F3** | Spec creada y embebida en el binario; test `internal/shared/openapi` exige que cubra todos los endpoints F2/F3 y que todos los `$ref` internos resuelvan. Mantenerla en cada tarea de endpoint (ADR-10) y validar en F6 con Spectral |
+| R2 | Spec OpenAPI desincronizándose de la implementación | **Mitigado en F2/F3/F6** | Spec creada y embebida en el binario; test `internal/shared/openapi` exige que cubra todos los endpoints y que todos los `$ref` internos resuelvan. En F6 se añadió `scripts/contract/check_openapi.sh` (pruebas Go + Spectral) y `.spectral.yaml`; el contrato pasa sin errores. Mantener la validación en cada tarea de endpoint (ADR-10) |
 | R3 | Motor LLM y proveedor de mapas sin definir | **Decisión pendiente** | Afecta coste, claves y latencia; configurable por env |
 | R4 | Volumen real de vehículos y frecuencia de GPS desconocida | **Supuesto** | El plan asume cientos de vehículos (RNF-06); no hay cifras confirmadas |
 | R5 | Retención y coste de TimescaleDB no definidos | Pendiente | Definir política de retención antes de producción |
@@ -487,21 +502,40 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | R7 | La arquitectura de microservicios documentada no se implementa en esta fase | **ADR-01** | Documentar en el README el camino de extracción futura |
 | R8 | No hay definición de notificaciones (email/SMS) a tenderos/clientes | Fuera de alcance | Confirmar si se incluye o se excluye explícitamente |
 | R11 | Registro `STORE` crea la fila de `stores` junto al usuario (supuesto F2) | **Resuelto (2026-10-28)** | El usuario pidió el alta de tienda como **paso propio**: `POST /api/v1/stores` (rol STORE, 409 si ya tiene) y `GET /api/v1/stores/me`, con `store` ahora **opcional** en `POST /auth/register` (si viene, nace junto al usuario en la misma transacción). Una tienda por dueño protegida por índice único (migración `0006_store_owner_unique`) |
-| R10 | Swagger spec desincronizado de la implementación | Riesgo | Mitigado por ADR-10: el spec se actualiza en la misma tarea del endpoint + validación de contrato en F6 |
+| R10 | Swagger spec desincronizado de la implementación | **Mitigado en F6** | ADR-10 + `scripts/contract/check_openapi.sh` en CI (Spectral con `--fail-severity=error` + pruebas Go del spec y `$ref`) |
 | R12 | Autenticación del handshake WS en navegadores | **Resuelto (2026-10-28)** | Los navegadores no pueden fijar `Authorization` en el handshake: `/ws` acepta `?access_token=` además del header. El token sigue siendo el mismo access token JWT, se valida en servidor y la sesión se cierra al expirar (`4401`). Los clientes nativos usan el header |
 | R9 | Origen de la geocodificación de `orders.destination` sin definir | **Pendiente** | ¿El cliente envía lat/lon o dirección? Definir quién geocodifica (cliente, backend o proveedor externo) — ver `doc/arquitectura/database/modelo_datos.md` §6 |
+| R13 | Cambio en curso en `stores` rompe la compilación global | **Bloqueo temporal** | `StoresUseCase.List` pasa `200` a `domain.ListFilter` (`stores.go:97`). No pertenece a F6; hay que completarlo antes de declarar el pipeline verde |
+| R14 | Rate limiting en memoria por instancia | **Aceptado (F6)** | Con varias réplicas ECS el límite efectivo se multiplica. Mitigación recomendada: regla rate-based en AWS WAF o backend Redis (requiere ADR) |
+| R15 | RDS no soporta TimescaleDB | **Limitación de IaC** | El Terraform de F6 es un despliegue de referencia; para telemetría usar Timescale Cloud o PostgreSQL autogestionado con `timescale/timescaledb-ha` (ver `infra/README.md`) |
+| R16 | `npm audit` móvil con 15 vulnerabilidades transitivas | **Abierto (upstream)** | `postcss` dentro de Expo SDK 54; el fix automático propone `expo@51` (breaking). El job `security` lo reporta sin bloquear |
+| R17 | Build nativo iOS y firma móvil no validados | **Limitación de entorno** | No hay macOS/Xcode; Fastlane en Linux solo ejecuta `test`/`build`/`ci` (bundle JS). La lane `ios` falla explícitamente fuera de macOS |
 
 ---
 
 ## 11. Validación Final (checklist de arquitectura)
 
-- [ ] Todos los RF-01…RF-10 tienen componente, endpoint y prueba asignados (§2.1, §8).
-- [ ] Todos los RNF-01…RNF-09 tienen fase y evidencia de verificación (§2.2, §8).
-- [ ] Ningún componente sin responsabilidad definida (§4, §6).
-- [ ] El aislamiento de datos por rol está implementado y probado server-side.
-- [ ] El camino offline→online del móvil no duplica datos (idempotencia extremo a extremo).
-- [ ] Las decisiones ADR-01…ADR-10 están reflejadas en el código o documentadas como pendientes.
-- [ ] Todas las columnas geográficas usan `geometry(Point,4326)` con índice GiST (PostGIS) y `orders.destination` está poblada en las órdenes de seed.
-- [ ] `backend/api/openapi.yaml` cubre el 100 % de los endpoints REST y Swagger UI carga sin errores de validación (ADR-10).
-- [ ] Web y móvil consumen los tipos/contratos generados del spec OpenAPI.
-- [ ] El README incluye decisiones de arquitectura y auditoría del uso de la IA.
+**Estado global:** F1–F5 verificadas; F6 implementada y validada por componentes,
+con la validación global pendiente del cambio en curso en `stores` (R13).
+
+| Control | Estado | Evidencia |
+|---|---|---|
+| RF-01…RF-10 con componente, endpoint y prueba | ✅ | §2.1, §8; módulos `auth`, `orders`, `stores`, `telemetry`, `aiagent` |
+| RNF-01…RNF-09 con fase y evidencia | ✅ | §2.2, §8; F6 cubre RNF-06/08/09 y valida RNF-04 con k6 |
+| Componentes con responsabilidad definida | ✅ | §4 y §6; sin componentes huérfanos |
+| Aislamiento de datos server-side | ✅ | `middleware.RequireRole` + scope en usecases; e2e F2/F3 y auditoría F6 |
+| Offline→online sin duplicados | ✅ | `Idempotency-Key` extremo a extremo; validado contra backend real |
+| ADR-01…ADR-10 reflejadas o pendientes | ✅ | Código + §3; R15 documenta la excepción de TimescaleDB en RDS |
+| Geodatos `geometry(Point,4326)` + GiST | ✅ | Migraciones 0003/0004; seed georreferenciado |
+| OpenAPI cubre endpoints y Swagger válido | ✅ | `scripts/contract/check_openapi.sh`; Spectral sin errores |
+| Web y móvil usan tipos generados | ✅ | `npm run check:api` en ambos; jobs `web`/`mobile` del CI |
+| README con decisiones y auditoría IA | ✅ | `README.md` → «Auditoría del uso de la IA» |
+| Rate limiting en login/telemetría/IA | ✅ | `shared/ratelimit`; prueba E2E 429 + `Retry-After` |
+| k6 cumple umbrales RNF-04/RNF-06 | ✅ | p95 ingesta 11,8 ms; p95 WS 11 ms; 0 5xx |
+| `terraform plan` sin errores | ✅ (offline) | 36 recursos; `apply` real pendiente de credenciales AWS |
+| Pipeline completo verde | 🟡 | Jobs definidos y reproducidos localmente; falta cerrar R13 y ejecutar en remoto |
+| Auditoría de seguridad §9.4 | ✅ | `doc/seguridad/auditoria_f6.md` (10 hallazgos) |
+
+> Los controles ✅ de F6 no implican que el repositorio compile globalmente en
+> este instante: R13 es un cambio ajeno en curso. Al completarlo, ejecutar
+> `make ci-local` y actualizar la fila «Pipeline completo verde».
