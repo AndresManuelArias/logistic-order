@@ -494,10 +494,12 @@ paths:
     post:
       tags: [Orders]
       operationId: createOrder
-      summary: Crea una orden (rol STORE)
+      summary: Crea una orden (roles STORE y PROVIDER)
       description: |
-        La orden queda siempre vinculada a la tienda del token autenticado:
-        enviar otro `store_id` devuelve `403`. `origin` y `destination` se
+        STORE crea para su propia tienda; enviar otro `store_id` devuelve `403`.
+        PROVIDER puede crear una orden para una tienda existente indicando
+        `store_id`, siempre que el token incluya su `provider_id`. `origin` y
+        `destination` se
         persisten como `geometry(Point,4326)` con PostGIS (ADR-09) y
         `distance_meters` se calcula con `ST_DistanceSphere`.
       security:

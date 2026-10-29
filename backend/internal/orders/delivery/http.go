@@ -30,7 +30,7 @@ func NewHandler(uc *usecase.OrdersUseCase, log *slog.Logger) *Handler {
 
 // RegisterRoutes monta /api/v1/orders/*. GET /{id} permite invitados (scope).
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler, roles func(...string) func(http.Handler) http.Handler) {
-	mux.Handle("POST /api/v1/orders", auth(roles("STORE")(http.HandlerFunc(h.Create))))
+	mux.Handle("POST /api/v1/orders", auth(roles("STORE", "PROVIDER")(http.HandlerFunc(h.Create))))
 	mux.Handle("GET /api/v1/orders", auth(http.HandlerFunc(h.List)))
 	mux.Handle("GET /api/v1/orders/{id}", auth(http.HandlerFunc(h.Get)))
 	mux.Handle("PATCH /api/v1/orders/{id}/status", auth(http.HandlerFunc(h.ChangeStatus)))
