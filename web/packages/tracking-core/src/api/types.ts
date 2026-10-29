@@ -26,6 +26,9 @@ export type GuestTokenResponse =
 export type VehiclePage =
   paths['/api/v1/vehicles']['get']['responses'][200]['content']['application/json']
 
+export type StorePage =
+  paths['/api/v1/stores']['get']['responses'][200]['content']['application/json']
+
 // Driver no está en el OpenAPI generado (módulo nuevo); se declara aquí de forma manual.
 export interface Driver {
   id: string

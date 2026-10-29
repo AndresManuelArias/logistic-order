@@ -12,6 +12,7 @@ import type {
   PointInput,
   Schemas,
   Store,
+  StorePage,
   TelemetryPoint,
   TokenPair,
   TrackResponse,
@@ -68,7 +69,7 @@ export interface ApiClient {
   getOrder: (id: string) => Promise<Order>
   changeOrderStatus: (id: string, status: OrderStatus) => Promise<Order>
   assignOrder: (id: string, input: { vehicle_id: string; driver_id: string }) => Promise<Order>
-  listStores: () => Promise<Store[]>
+  listStores: (params?: { name?: string; limit?: number; offset?: number }) => Promise<StorePage>
   getMyStore: () => Promise<Store>
   createStore: (input: CreateStoreInput) => Promise<Store>
   issueGuestToken: (orderId: string) => Promise<GuestTokenResponse>
@@ -201,7 +202,14 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         body: input,
       }),
 
-    listStores: () => request<Store[]>('/api/v1/stores'),
+    listStores: (params = {}) => {
+      const query = new URLSearchParams()
+      if (params.name) query.set('name', params.name)
+      if (params.limit) query.set('limit', String(params.limit))
+      if (params.offset !== undefined) query.set('offset', String(params.offset))
+      const suffix = query.size ? `?${query.toString()}` : ''
+      return request<StorePage>(`/api/v1/stores${suffix}`)
+    },
 
     getMyStore: () => request<Store>('/api/v1/stores/me'),
 

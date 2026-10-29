@@ -8,6 +8,7 @@ import { useAuth } from './auth-provider'
 
 const NAV: ReadonlyArray<{ href: string; label: string; roles: readonly Role[] }> = [
   { href: '/proveedor', label: 'Flota', roles: ['PROVIDER'] },
+  { href: '/proveedor/tiendas', label: 'Tiendas', roles: ['PROVIDER'] },
   { href: '/tienda', label: 'Mi tienda', roles: ['STORE'] },
   { href: '/conductor', label: 'Mis entregas', roles: ['DRIVER'] },
 ]

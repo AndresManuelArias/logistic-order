@@ -31,8 +31,8 @@ export function ProviderCreateOrderForm({
   useEffect(() => {
     let cancelled = false
     setStoresLoading(true)
-    api.listStores().then((items) => {
-      if (!cancelled) setStores(items)
+    api.listStores({ limit: 200 }).then((page) => {
+      if (!cancelled) setStores(page.items)
     }).catch((reason) => {
       if (!cancelled) setError(toApiError(reason).message || 'No se pudieron cargar las tiendas.')
     }).finally(() => {

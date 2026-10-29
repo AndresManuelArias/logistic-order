@@ -31,8 +31,8 @@ func NewHandler(uc *usecase.StoresUseCase, log *slog.Logger) *Handler {
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler, roles func(...string) func(http.Handler) http.Handler) {
 	mux.Handle("POST /api/v1/stores", auth(roles("STORE")(http.HandlerFunc(h.Create))))
 	mux.Handle("GET /api/v1/stores/me", auth(roles("STORE")(http.HandlerFunc(h.Me))))
-	// GET /api/v1/stores — disponible para cualquier rol autenticado (no guest).
-	mux.Handle("GET /api/v1/stores", auth(http.HandlerFunc(h.List)))
+	// GET /api/v1/stores — solo rol PROVIDER.
+	mux.Handle("GET /api/v1/stores", auth(roles("PROVIDER")(http.HandlerFunc(h.List))))
 }
 
 type storeRequest struct {

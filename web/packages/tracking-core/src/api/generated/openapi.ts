@@ -170,7 +170,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lista las tiendas disponibles (rol PROVIDER) */
+        /**
+         * Lista paginada de tiendas disponibles
+         * @description Devuelve todas las tiendas registradas en la plataforma.
+         *     Accesible para cualquier usuario autenticado (`PROVIDER`, `STORE`,
+         *     `DRIVER`). Los tokens de invitado reciben `403`.
+         *
+         *     Soporta búsqueda por nombre parcial (case-insensitive) y paginación
+         *     mediante `limit` / `offset`.
+         */
         get: operations["listStores"];
         put?: never;
         /**
@@ -398,6 +406,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/drivers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Conductores asignados a un vehículo (rol PROVIDER)
+         * @description Devuelve los conductores (`app.drivers`) asignados al vehículo
+         *     indicado. Solo el `PROVIDER` dueño de ese vehículo puede consultarlos.
+         *
+         *     El `id` de cada conductor es el valor que debe usarse como `driver_id`
+         *     en `POST /api/v1/orders/{id}/assignment`. Es el `app.drivers.id`
+         *     (no el `app.users.id`).
+         *
+         *     Si el `vehicle_id` no pertenece a la flota del proveedor autenticado,
+         *     la respuesta es `403` (no se revela si el vehículo existe).
+         */
+        get: operations["listDriversByVehicle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vehicles/{id}/latest": {
         parameters: {
             query?: never;
@@ -599,6 +635,43 @@ export interface components {
             lon: number;
             /** Format: date-time */
             created_at: string;
+        };
+        StoreListResponse: {
+            items: components["schemas"]["Store"][];
+            /** @description Total de tiendas antes de paginar. */
+            total: number;
+            /** @description Límite aplicado en esta página. */
+            limit: number;
+            /** @description Desplazamiento aplicado en esta página. */
+            offset: number;
+        };
+        /** @description Conductor asignado a un vehículo de la flota. */
+        Driver: {
+            /**
+             * Format: uuid
+             * @description `app.drivers.id` — es el identificador que se usa en
+             *     `POST /api/v1/orders/{id}/assignment` como `driver_id`.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Usuario con rol `DRIVER` vinculado a este registro.
+             */
+            user_id: string;
+            /** @description Nombre completo del conductor. */
+            full_name: string;
+            /** @description Número de licencia de conducción. */
+            license_number: string;
+            /**
+             * Format: uuid
+             * @description Vehículo al que está asignado el conductor.
+             */
+            vehicle_id: string;
+        };
+        DriverListResponse: {
+            items: components["schemas"]["Driver"][];
+            /** @description Total de conductores asignados al vehículo. */
+            total: number;
         };
         /** @enum {string} */
         OrderStatus: "CREATED" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED";
@@ -1164,24 +1237,60 @@ export interface operations {
     };
     listStores: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Filtro por nombre parcial (case-insensitive). */
+                name?: string;
+                /** @description Número máximo de resultados por página (1–200). */
+                limit?: number;
+                /** @description Desplazamiento para la paginación. */
+                offset?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Tiendas disponibles para crear órdenes. */
+            /** @description Página de tiendas. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Store"][];
+                    /**
+                     * @example {
+                     *       "items": [
+                     *         {
+                     *           "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                     *           "name": "Tienda La Esquina",
+                     *           "owner_user_id": "f1e2d3c4-b5a6-7890-abcd-ef1234567890",
+                     *           "address": "Bogotá D.C.",
+                     *           "lat": 4.655,
+                     *           "lon": -74.0632,
+                     *           "created_at": "2024-01-01T00:00:00Z"
+                     *         },
+                     *         {
+                     *           "id": "b2c3d4e5-f6a7-8901-bcde-f01234567891",
+                     *           "name": "Tienda El Mercado",
+                     *           "owner_user_id": "e2d3c4b5-a6f7-8901-bcde-f01234567891",
+                     *           "address": "Bogotá D.C.",
+                     *           "lat": 4.627,
+                     *           "lon": -74.083,
+                     *           "created_at": "2024-01-02T00:00:00Z"
+                     *         }
+                     *       ],
+                     *       "total": 2,
+                     *       "limit": 50,
+                     *       "offset": 0
+                     *     }
+                     */
+                    "application/json": components["schemas"]["StoreListResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
         };
     };
     createStore: {
@@ -1530,6 +1639,47 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listDriversByVehicle: {
+        parameters: {
+            query: {
+                /** @description UUID del vehículo cuya lista de conductores se consulta. */
+                vehicle_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conductores asignados al vehículo. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "items": [
+                     *         {
+                     *           "id": "c3d4e5f6-a7b8-9012-cdef-012345678902",
+                     *           "user_id": "d4e5f6a7-b8c9-0123-def0-123456789003",
+                     *           "full_name": "Carlos Ramírez",
+                     *           "license_number": "LIC-100000",
+                     *           "vehicle_id": "e1cf4001-75f0-45fa-94e4-484b2335213f"
+                     *         }
+                     *       ],
+                     *       "total": 1
+                     *     }
+                     */
+                    "application/json": components["schemas"]["DriverListResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
         };
     };
     getLatestPosition: {

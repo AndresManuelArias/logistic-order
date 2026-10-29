@@ -110,8 +110,11 @@ func (uc *StoresUseCase) List(ctx context.Context, p authz.Principal, in ListInp
 		"offset", in.Offset,
 	)
 
-	if p.IsGuest() {
-		uc.log.Error("List: invitado sin acceso a listado de tiendas", "trace_id", traceID)
+	if p.IsGuest() || !p.HasRole(authz.RoleProvider) {
+		uc.log.Error("List: acceso denegado, se requiere rol PROVIDER",
+			"trace_id", traceID,
+			"role", p.Role,
+		)
 		return nil, 0, domain.ErrForbiddenScope
 	}
 
