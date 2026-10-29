@@ -596,6 +596,19 @@ h3 {
   margin: 0;
 }
 
+.tt-ai__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+}
+
+.tt-ai__meta {
+  margin-top: 0.35rem;
+  color: var(--tt-muted);
+  font-size: 0.75rem;
+}
+
 .tt-ai__empty {
   margin: 0;
   color: var(--tt-muted);

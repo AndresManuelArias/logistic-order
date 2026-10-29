@@ -154,8 +154,9 @@ npm run check:api   # falla si el archivo generado está desactualizado
 ```
 
 No se escriben DTOs a mano: los tipos públicos salen de `openapi.ts` y se
-re-exportan con alias en `tracking-core/src/api/types.ts`. La única excepción
-declarada es `AiAnswer`, contrato provisional de F5 que aún no está en el spec.
+re-exportan con alias en `tracking-core/src/api/types.ts`. `AiAnswer` se declara
+en `tracking-core/src/api/client.ts` con la forma del contrato F5
+(`answer`, `tool`, `tools`, `model`, `audit_id`).
 
 ## Calidad
 
@@ -191,8 +192,10 @@ El contexto de build es `web/` (raíz de workspaces). El contenedor recibe
 
 ## Limitaciones conocidas
 
-- El panel de IA llama a `POST /api/v1/ai/query` (contrato provisional de F5).
-  Si el endpoint no existe, muestra "disponible en F5" sin inventar respuestas.
+- El panel de IA llama a `POST /api/v1/ai/query` (F5). Muestra la respuesta y
+  las herramientas consultadas; ante `503 AI_NOT_CONFIGURED` deshabilita el
+  formulario con un mensaje explícito, y ante `CIRCUIT_OPEN`, `AI_TIMEOUT` o
+  `AI_PROVIDER_ERROR` informa sin inventar datos.
 - No hay endpoint de listado de conductores: la asignación vehículo-conductor no
   se inventa en la UI.
 - La operación de campo del conductor (GPS en segundo plano, cola offline) es

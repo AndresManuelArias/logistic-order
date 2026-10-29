@@ -6,6 +6,15 @@
 **Último commit observado:** `77f3f8b add run dev web`
 **Alcance:** contraste requisito por requisito entre el enunciado (§4, §6 y §7) y el estado real del repositorio.
 
+> **Actualización 2026-10-29 (posterior al análisis):** la fase **F5** se
+> implementó y validó después de redactar este documento. El módulo
+> `backend/internal/aiagent`, `POST /api/v1/ai/query`, el catálogo cerrado de
+> herramientas, la auditoría en `app.ai_query_log` y el circuit breaker del LLM
+> ya existen. Las filas de las secciones B y C.5 que describen la IA como
+> pendiente se conservan como **línea base histórica**; el estado vigente está
+> en [`README.md`](../README.md), [`plan_desarrollo.md`](plan_desarrollo.md) y
+> [`arquitectura/monolito_modular/f5_agente_ia.md`](arquitectura/monolito_modular/f5_agente_ia.md).
+
 ---
 
 ## 0. Método y límites del análisis

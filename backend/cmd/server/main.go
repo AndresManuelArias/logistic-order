@@ -14,11 +14,11 @@ import (
 
 	"log/slog"
 
-	authdelivery "tiendas-track/backend/internal/auth/delivery"
 	aidelivery "tiendas-track/backend/internal/aiagent/delivery"
-	aipostgres "tiendas-track/backend/internal/aiagent/infrastructure/postgres"
 	aillm "tiendas-track/backend/internal/aiagent/infrastructure/llm"
+	aipostgres "tiendas-track/backend/internal/aiagent/infrastructure/postgres"
 	aiusecase "tiendas-track/backend/internal/aiagent/usecase"
+	authdelivery "tiendas-track/backend/internal/auth/delivery"
 	authinfrastructure "tiendas-track/backend/internal/auth/infrastructure"
 	authpostgres "tiendas-track/backend/internal/auth/infrastructure/postgres"
 	authusecase "tiendas-track/backend/internal/auth/usecase"
@@ -147,8 +147,10 @@ func run() error {
 		MaxSteps: cfg.AIMaxSteps,
 		Timeout:  cfg.AITimeout,
 	}, log)
-	if !cfg.AIEnabled || cfg.AIAPIKey == "" {
-		log.Warn("agente IA deshabilitado: configura AI_API_KEY (o AI_ENABLED=false para desactivarlo explícitamente)")
+	if !cfg.AIEnabled {
+		log.Info("agente IA deshabilitado explícitamente (AI_ENABLED=false)")
+	} else if cfg.AIAPIKey == "" {
+		log.Warn("agente IA deshabilitado: configura AI_API_KEY para habilitarlo")
 	}
 
 	handler := httpserver.NewWithModules(log, pool, httpserver.Options{

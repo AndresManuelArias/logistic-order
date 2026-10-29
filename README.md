@@ -275,6 +275,71 @@ Protocolo JSON (mensajes de cliente ≤ 4 KiB):
   clientes sin `Origin` (apps nativas) y mismo host.
 - Latencia medida en el e2e local: **~4 ms** (presupuesto RNF-04: 500 ms).
 
+## Agente IA operativo (F5)
+
+`POST /api/v1/ai/query` interpreta preguntas en lenguaje natural y las traduce a
+un **catálogo cerrado de herramientas** (ADR-07). El modelo elige la herramienta
+y los argumentos; **nunca escribe SQL**, y el servidor valida la entrada y aplica
+el ámbito del rol en SQL. Roles `PROVIDER`, `STORE` y `DRIVER`; los invitados
+reciben `403`.
+
+| Herramienta | Parámetros | Devuelve |
+|---|---|---|
+| `get_stopped_vehicles` | `minutes` (1–1440, def. 20), `area` (opcional) | Vehículos con parada vigente y su duración |
+| `get_order_status` | `order_id` (UUID) | Estado, hitos, tienda, placa y conductor |
+| `get_fleet_eta` | `store_id` (UUID, opcional) | Órdenes en tránsito con ETA estimada |
+| `get_late_deliveries` | `hours` (1–720, def. 24) | Órdenes pendientes que superaron la ventana |
+
+```bash
+PROVIDER_TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"proveedor@tiendas.dev","password":"Proveedor123"}' | jq -r .access_token)
+
+curl -s -X POST http://localhost:8080/api/v1/ai/query \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $PROVIDER_TOKEN" \
+  -d '{"question":"¿Qué vehículos llevan más de 20 minutos detenidos?"}'
+```
+
+```json
+{
+  "answer": "DEF456 lleva 25 minutos detenido en la tienda El Mercado.",
+  "tool": "get_stopped_vehicles",
+  "tools": [
+    {"name": "get_stopped_vehicles", "arguments": {"minutes": 20}, "ok": true, "duration_ms": 6}
+  ],
+  "model": "gpt-4o-mini",
+  "audit_id": "<uuid>"
+}
+```
+
+Configuración (el motor es intercambiable porque se habla el protocolo
+`/chat/completions` compatible con OpenAI):
+
+| Variable | Default | Notas |
+|---|---|---|
+| `AI_ENABLED` | `true` | `false` → `503 AI_NOT_CONFIGURED` |
+| `AI_BASE_URL` | `https://api.openai.com/v1` | OpenAI, Groq, Ollama, vLLM |
+| `AI_API_KEY` | vacío | Secreto; vacío deshabilita el agente |
+| `AI_MODEL` | `gpt-4o-mini` | Debe soportar function calling |
+| `AI_TIMEOUT` | `20s` | Presupuesto total de la consulta |
+| `AI_MAX_STEPS` | `4` | Pasos de tool-calling (1–8) |
+
+**Degradación controlada** (RNF-05): sin `AI_API_KEY` → `503 AI_NOT_CONFIGURED`;
+circuito abierto → `503 CIRCUIT_OPEN` con `Retry-After`; fallo del proveedor →
+`502 AI_PROVIDER_ERROR`; timeout → `504 AI_TIMEOUT`. Nunca un 500 inesperado por
+falta de configuración. La llamada al LLM usa un circuit breaker dedicado
+(`ai-llm`) y el resto de la plataforma sigue operativo.
+
+Cada consulta se audita en `app.ai_query_log` (migración `0007`): pregunta,
+herramientas, argumentos, resultado, modelo, latencia y estado. No se guardan
+secretos ni el prompt de sistema.
+
+Supuestos declarados: `area` filtra por nombre/dirección de la tienda asociada a
+la parada; la ETA es distancia en línea recta / velocidad (última muestra o
+30 km/h); «retrasada» significa pendiente (`CREATED`/`IN_TRANSIT`) con más de
+`hours` desde `placed_at`. Ver
+[`doc/arquitectura/monolito_modular/f5_agente_ia.md`](doc/arquitectura/monolito_modular/f5_agente_ia.md).
+
 ## Portal web multi-rol (F4)
 
 El portal vive en [`web/`](web/README.md) como monorepo npm:
@@ -386,7 +451,10 @@ distintos estados (`CREATED`, `IN_TRANSIT`, `DELIVERED`, `CANCELLED`) y sus
 eventos de historial. Además carga una **traza demo de 30 puntos por vehículo**
 (una muestra por minuto durante los últimos 30 minutos) para que `latest`,
 `track` y el WebSocket tengan datos que dibujar; si el vehículo ya tiene una
-traza reciente, no se duplica.
+traza reciente, no se duplica. El primer vehículo con orden en tránsito
+(`DEF456` en el seed) termina con una **parada de 25 minutos** y el agregado
+`telemetry.stops` se refresca al final, de modo que la pregunta de aceptación de
+F5 devuelve filas reales sin esperar al refresco automático.
 
 Los vehículos `ABC123`, `DEF456` y `GHI789` quedan con 30 muestras demo cada
 uno (más las que ya existieran), y `track` las devuelve de la más reciente a la
@@ -507,11 +575,11 @@ backend/
 ├── internal/stores/               # F2: alta de tienda (paso propio) y consulta /me
 ├── internal/telemetry/            # F3: ingesta, bulk idempotente, latest/track, canales
 ├── internal/seed/                 # datos demo idempotentes (incluye telemetría)
-├── internal/aiagent/              # F5
-├── migrations/                    # SQL embebido y versionado (0001…0006)
+├── internal/aiagent/              # F5: agente IA, catálogo de herramientas y auditoría
+├── migrations/                    # SQL embebido y versionado (0001…0007)
 └── pkg/logger/                    # slog estructurado
 scripts/e2e_f2.sh                  # e2e de la F2 (72 casos)
-scripts/e2e_f3.sh                  # e2e de la F3 (60 casos)
+scripts/e2e_f3.sh                  # e2e de la F3 (63 casos)
 web/                               # portal Next.js + librerías compartidas (F4)
 ├── apps/portal/                   # rutas, BFF y paneles por rol
 ├── packages/tracking-core/        # cliente OpenAPI, WS y hook useTracking
@@ -545,7 +613,7 @@ Las migraciones se aplican automáticamente al arrancar el backend (`MIGRATE_ON_
 | F2 — Auth, RBAC y órdenes | ✅ Completada (2026-10-28) |
 | F3 — Telemetría y WebSockets | ✅ Completada (2026-10-28) |
 | F4 — Portal y app móvil | ✅ Implementados (2026-10-28); validación en dispositivo pendiente (sin emulador/SDK) |
-| F5 — Agente IA | ⬜ Pendiente |
+| F5 — Agente IA | ✅ Implementado (2026-10-29); prueba con proveedor real pendiente (sin API key en el entorno) |
 | F6 — Carga, IaC y CI/CD | ⬜ Pendiente |
 
 ## Problemas comunes

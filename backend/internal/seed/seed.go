@@ -288,6 +288,19 @@ func seedTelemetry(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (i
 		return 0, fmt.Errorf("seed telemetría: rows: %w", err)
 	}
 
+	// La parada demo se asigna al primer vehículo con orden en tránsito para
+	// que quede asociada a una tienda y sea visible también para el rol STORE.
+	stopVehicle := ""
+	for _, v := range vehicles {
+		if v.orderID != "" {
+			stopVehicle = v.id
+			break
+		}
+	}
+	if stopVehicle == "" && len(vehicles) > 0 {
+		stopVehicle = vehicles[0].id
+	}
+
 	total := 0
 	for i, v := range vehicles {
 		// ¿Ya existe una traza demo reciente? (evita duplicar en cada `make seed`).
@@ -308,7 +321,7 @@ func seedTelemetry(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (i
 		// herramienta get_stopped_vehicles tenga una parada vigente.
 		lat := 4.6480 + float64(i)*0.0120
 		lon := -74.0720 + float64(i)*0.0090
-		stopDemo := i == 0
+		stopDemo := v.id == stopVehicle
 		var order any
 		if v.orderID != "" {
 			order = v.orderID

@@ -52,6 +52,9 @@ LEFT JOIN app.orders o ON o.id = si.order_id
 LEFT JOIN app.stores st ON st.id = o.store_id
 WHERE si.duration_seconds >= $4 * 60
   AND si.stop_end >= now() - INTERVAL '3 minutes'
+  -- Scope STORE: la parada debe pertenecer a una orden de la tienda del token,
+  -- no basta con que el vehículo haya entregado allí en el pasado.
+  AND (NULLIF($2, '')::uuid IS NULL OR o.store_id = NULLIF($2, '')::uuid)
   AND ($5 = '' OR st.name ILIKE '%' || $5 || '%' OR st.address ILIKE '%' || $5 || '%')
 ORDER BY si.duration_seconds DESC
 LIMIT $6`

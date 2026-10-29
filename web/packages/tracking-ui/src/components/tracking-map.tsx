@@ -9,6 +9,7 @@ import {
   padBounds,
   type GeoPoint,
 } from '../lib/geometry'
+import { createTrackingMap } from '../lib/map'
 import type { Tone } from './status-badge'
 
 export interface TrackingMarker extends GeoPoint {
@@ -55,6 +56,7 @@ export function TrackingMap({
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map())
+  const hasData = markers.length > 0 || trails.some((trail) => trail.points.length > 0)
 
   // Compute bounds for the map view
   const bounds = useCallback(() => {
@@ -67,32 +69,7 @@ export function TrackingMap({
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return
 
-    // Use OpenStreetMap raster tiles (free, no API key needed)
-    const style: maplibregl.StyleSpecification = {
-      version: 8,
-      sources: {
-        'osm-tiles': {
-          type: 'raster',
-          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-          tileSize: 256,
-          attribution: '© OpenStreetMap contributors',
-        },
-      },
-      layers: [
-        {
-          id: 'osm-raster',
-          type: 'raster',
-          source: 'osm-tiles',
-        },
-      ],
-    }
-
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: style,
-      center: [-74.05, 4.65], // Bogotá default
-      zoom: 14,
-    })
+    const map = createTrackingMap(mapContainerRef.current)
 
     map.addControl(new maplibregl.NavigationControl(), 'top-left')
 
@@ -251,15 +228,6 @@ export function TrackingMap({
     }
   }, [trails, selectedId])
 
-  // Show empty state if no data
-  if (markers.length === 0 && trails.every((trail) => trail.points.length === 0)) {
-    return (
-      <div className="tt-map tt-map--empty" role="status">
-        <p>{emptyLabel}</p>
-      </div>
-    )
-  }
-
   const heading = summary ?? `${markers.length} vehículo(s) en el mapa`
 
   return (
@@ -270,6 +238,11 @@ export function TrackingMap({
         aria-hidden="true"
         style={{ width: '100%', height: `${VIEW_HEIGHT}px` }}
       />
+      {!hasData ? (
+        <p className="tt-map__empty" role="status">
+          {emptyLabel}
+        </p>
+      ) : null}
 
       <div className="tt-map__legend">
         <p className="tt-map__summary">{heading}</p>

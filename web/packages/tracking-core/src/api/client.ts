@@ -40,12 +40,22 @@ export interface TrackRange {
   limit?: number
 }
 
-// Respuesta provisional del agente operativo (F5). Mientras el endpoint no
-// exista, el portal muestra un estado "disponible en F5" en lugar de inventar
-// datos.
+// Respuesta del agente operativo (F5). `tools` permite mostrar al usuario qué
+// herramienta se consultó y si falló; el portal no inventa respuestas.
+export interface AiToolInvocation {
+  name: string
+  arguments?: Record<string, unknown>
+  ok: boolean
+  error?: string
+  duration_ms: number
+}
+
 export interface AiAnswer {
   answer?: string
   tool?: string
+  tools?: AiToolInvocation[]
+  model?: string
+  audit_id?: string
 }
 
 export interface ApiClient {

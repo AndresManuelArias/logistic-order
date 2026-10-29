@@ -1,8 +1,10 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { afterEach, vi } from 'vitest'
 
-// Mock de maplibre-gl antes de que se importe el componente
+// Mock de maplibre-gl antes de que se importe el componente.
+// Los constructores se declaran como funciones normales (no flecha) porque el
+// componente los invoca con `new`; una arrow function no es construible.
 vi.mock('maplibre-gl', () => {
   const mockMap = {
     addControl: vi.fn(),
@@ -16,18 +18,36 @@ vi.mock('maplibre-gl', () => {
     addLayer: vi.fn(),
     fitBounds: vi.fn(),
     setStyle: vi.fn(),
+    setWorkerUrl: vi.fn(),
   }
 
-  return {
-    Map: vi.fn(() => mockMap),
-    Marker: vi.fn(() => ({
+  function MockMap() {
+    return mockMap
+  }
+
+  function MockMarker() {
+    return {
       setLngLat: vi.fn().mockReturnThis(),
       addTo: vi.fn().mockReturnThis(),
       remove: vi.fn(),
       getElement: vi.fn().mockReturnValue(document.createElement('div')),
-    })),
-    LngLat: vi.fn((lng: number, lat: number) => ({ lng, lat })),
-    NavigationControl: vi.fn(() => ({})),
+    }
+  }
+
+  function MockLngLat(lng: number, lat: number) {
+    return { lng, lat }
+  }
+
+  function MockNavigationControl() {
+    return {}
+  }
+
+  return {
+    Map: vi.fn(MockMap),
+    setWorkerUrl: vi.fn(),
+    Marker: vi.fn(MockMarker),
+    LngLat: vi.fn(MockLngLat),
+    NavigationControl: vi.fn(MockNavigationControl),
   }
 })
 
