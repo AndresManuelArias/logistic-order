@@ -50,6 +50,13 @@ services:
       WS_GRANT_TTL: ${WS_GRANT_TTL:-60s}
       CB_FAILURE_THRESHOLD: ${CB_FAILURE_THRESHOLD:-5}
       CB_TIMEOUT: ${CB_TIMEOUT:-10s}
+      # F5: agente IA (RF-10, RNF-05). Sin AI_API_KEY responde 503 controlado.
+      AI_ENABLED: ${AI_ENABLED:-true}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+      AI_TIMEOUT: ${AI_TIMEOUT:-20s}
+      AI_MAX_STEPS: ${AI_MAX_STEPS:-4}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     restart: unless-stopped

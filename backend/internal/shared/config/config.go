@@ -36,6 +36,15 @@ type Config struct {
 	WSGrantTTL         time.Duration
 	CBFailureThreshold uint32
 	CBTimeout          time.Duration
+
+	// F5: agente operativo de IA (RF-10, RNF-05). La API key es un secreto:
+	// si falta, el agente queda deshabilitado y responde 503 controlado.
+	AIEnabled  bool
+	AIBaseURL  string
+	AIAPIKey   string
+	AIModel    string
+	AITimeout  time.Duration
+	AIMaxSteps int
 }
 
 // Load lee la configuración del entorno. Falla si falta DATABASE_URL,
@@ -82,6 +91,23 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.CBFailureThreshold = uint32(threshold)
+
+	// Agente IA (F5). Sin AI_API_KEY el agente se deshabilita; no es un error
+	// de arranque para que el resto del sistema siga operativo.
+	cfg.AIEnabled = getBool("AI_ENABLED", true)
+	cfg.AIBaseURL = getEnv("AI_BASE_URL", "https://api.openai.com/v1")
+	cfg.AIAPIKey = os.Getenv("AI_API_KEY")
+	cfg.AIModel = getEnv("AI_MODEL", "gpt-4o-mini")
+	cfg.AITimeout = getDuration("AI_TIMEOUT", 20*time.Second)
+
+	steps, err := getInt32("AI_MAX_STEPS", 4)
+	if err != nil {
+		return nil, err
+	}
+	if steps < 1 || steps > 8 {
+		return nil, fmt.Errorf("config: AI_MAX_STEPS debe estar entre 1 y 8")
+	}
+	cfg.AIMaxSteps = int(steps)
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")

@@ -15,6 +15,10 @@ import (
 	"log/slog"
 
 	authdelivery "tiendas-track/backend/internal/auth/delivery"
+	aidelivery "tiendas-track/backend/internal/aiagent/delivery"
+	aipostgres "tiendas-track/backend/internal/aiagent/infrastructure/postgres"
+	aillm "tiendas-track/backend/internal/aiagent/infrastructure/llm"
+	aiusecase "tiendas-track/backend/internal/aiagent/usecase"
 	authinfrastructure "tiendas-track/backend/internal/auth/infrastructure"
 	authpostgres "tiendas-track/backend/internal/auth/infrastructure/postgres"
 	authusecase "tiendas-track/backend/internal/auth/usecase"
@@ -122,6 +126,31 @@ func run() error {
 		GrantTTL:       cfg.WSGrantTTL,
 	})
 
+	// F5: agente IA operativo (RF-10) + circuit breaker del proveedor LLM
+	// (RNF-05). Sin AI_API_KEY el agente responde 503 controlado y el resto
+	// del sistema sigue funcionando.
+	aiRepo := aipostgres.NewAnalyticsRepository(pool)
+	aiAudit := aipostgres.NewAuditRepository(pool)
+	aiModel := aillm.New(aillm.Config{
+		BaseURL: cfg.AIBaseURL,
+		APIKey:  cfg.AIAPIKey,
+		Timeout: cfg.AITimeout,
+	})
+	aiBreaker := resilience.New(resilience.Settings{
+		Name:             "ai-llm",
+		FailureThreshold: cfg.CBFailureThreshold,
+		Timeout:          cfg.CBTimeout,
+	})
+	aiUC := aiusecase.New(aiRepo, aiAudit, aiModel, aiBreaker, aiusecase.Config{
+		Enabled:  cfg.AIEnabled && cfg.AIAPIKey != "",
+		Model:    cfg.AIModel,
+		MaxSteps: cfg.AIMaxSteps,
+		Timeout:  cfg.AITimeout,
+	}, log)
+	if !cfg.AIEnabled || cfg.AIAPIKey == "" {
+		log.Warn("agente IA deshabilitado: configura AI_API_KEY (o AI_ENABLED=false para desactivarlo explícitamente)")
+	}
+
 	handler := httpserver.NewWithModules(log, pool, httpserver.Options{
 		Token: tokenSvc,
 		Modules: httpserver.Modules{
@@ -129,6 +158,7 @@ func run() error {
 			Orders:    ordersdelivery.NewHandler(ordersUC, log),
 			Stores:    storesdelivery.NewHandler(storesUC, log),
 			Telemetry: telemetrydelivery.NewHandler(telemetryUC, fleetUC, hub, tokenSvc, log),
+			AI:        aidelivery.NewHandler(aiUC, log),
 		},
 	})
 

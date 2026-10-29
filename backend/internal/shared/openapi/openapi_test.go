@@ -61,6 +61,7 @@ func TestSpecCubreEndpointsF2(t *testing.T) {
 		{"/api/v1/vehicles", "get"},
 		{"/api/v1/vehicles/{id}/latest", "get"},
 		{"/api/v1/vehicles/{id}/track", "get"},
+		{"/api/v1/ai/query", "post"},
 		{"/ws", "get"},
 	}
 	for _, r := range required {
@@ -159,6 +160,37 @@ func TestSpecContratoTiempoReal(t *testing.T) {
 	}
 	if !found {
 		t.Error("el bulk debe documentar el header Idempotency-Key")
+	}
+}
+
+// El contrato del agente IA debe declarar la validación de la pregunta y las
+// degradaciones controladas (RF-10, RNF-05).
+func TestSpecContratoAgenteIA(t *testing.T) {
+	var doc struct {
+		Paths map[string]map[string]any `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(SpecYAML(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	path, ok := doc.Paths["/api/v1/ai/query"]
+	if !ok {
+		t.Fatal("falta /api/v1/ai/query")
+	}
+	post, ok := path["post"].(map[string]any)
+	if !ok {
+		t.Fatal("falta POST /api/v1/ai/query")
+	}
+	responses, ok := post["responses"].(map[string]any)
+	if !ok {
+		t.Fatal("el endpoint no declara responses")
+	}
+	for _, code := range []string{"200", "403", "422", "502", "503", "504"} {
+		if _, ok := responses[code]; !ok {
+			t.Errorf("falta la respuesta %s del agente IA", code)
+		}
+	}
+	if _, ok := post["requestBody"]; !ok {
+		t.Error("el endpoint debe declarar requestBody")
 	}
 }
 

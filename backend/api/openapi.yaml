@@ -44,6 +44,8 @@ tags:
     description: Flota visible para el rol autenticado, con la última posición conocida (RF-02).
   - name: Realtime
     description: Canal WebSocket `/ws` para posición en tiempo real filtrada por rol (RF-04, ADR-03).
+  - name: AI
+    description: Agente operativo en lenguaje natural con catálogo cerrado de herramientas y auditoría (RF-10).
   - name: Ops
     description: Operabilidad del servicio (F1).
 
@@ -1011,6 +1013,58 @@ paths:
           sendBuffer: 256
         latencyBudgetMs: 500
 
+  /api/v1/ai/query:
+    post:
+      tags: [AI]
+      operationId: queryAi
+      summary: Consulta en lenguaje natural al agente operativo (RF-10)
+      description: |
+        Roles `PROVIDER`, `STORE` y `DRIVER`; los invitados reciben `403`.
+
+        El agente traduce la pregunta a un **catálogo cerrado de herramientas**
+        (`get_stopped_vehicles`, `get_order_status`, `get_fleet_eta`,
+        `get_late_deliveries`). Nunca ejecuta SQL libre y el ámbito de datos se
+        aplica en el servidor según el rol del token.
+
+        Cada consulta se audita en `app.ai_query_log` con la pregunta, las
+        herramientas y argumentos usados, el resultado, el modelo y la latencia.
+
+        **Degradación controlada:** sin `AI_API_KEY` (o con `AI_ENABLED=false`)
+        responde `503 AI_NOT_CONFIGURED`; con el circuito abierto responde
+        `503 CIRCUIT_OPEN` y `Retry-After`; un fallo del proveedor responde
+        `502 AI_PROVIDER_ERROR`; un timeout responde `504 AI_TIMEOUT`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiQueryRequest"
+            example:
+              question: "¿Qué vehículos llevan más de 20 minutos detenidos?"
+      responses:
+        "200":
+          description: Respuesta del agente con las herramientas invocadas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiQueryResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1408,6 +1462,58 @@ components:
           items:
             $ref: "#/components/schemas/TelemetryPoint"
 
+    AiQueryRequest:
+      type: object
+      required: [question]
+      additionalProperties: false
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Pregunta en lenguaje natural sobre la operación del usuario.
+
+    AiToolInvocation:
+      type: object
+      required: [name, ok, duration_ms]
+      properties:
+        name:
+          type: string
+          examples: [get_stopped_vehicles]
+        arguments:
+          type: object
+          additionalProperties: true
+          description: Argumentos validados que se enviaron a la herramienta.
+        ok:
+          type: boolean
+        error:
+          type: string
+          description: Mensaje saneado cuando la herramienta falló.
+        duration_ms:
+          type: integer
+          minimum: 0
+
+    AiQueryResponse:
+      type: object
+      required: [answer]
+      properties:
+        answer:
+          type: string
+          description: Respuesta final del agente basada solo en datos de herramientas.
+        tool:
+          type: string
+          description: Primera herramienta ejecutada con éxito (si hubo).
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/AiToolInvocation"
+        model:
+          type: string
+        audit_id:
+          type: string
+          format: uuid
+          description: Identificador del registro en `app.ai_query_log`.
+
   responses:
     BadRequest:
       description: Cuerpo JSON malformado o entrada no legible.
@@ -1448,7 +1554,20 @@ components:
     ServiceUnavailable:
       description: |
         Dependencia degradada. En telemetría indica circuit breaker abierto
-        (`503 CIRCUIT_OPEN`); incluye `Retry-After`.
+        (`503 CIRCUIT_OPEN`); incluye `Retry-After`. En el agente IA también
+        cubre `AI_NOT_CONFIGURED` cuando falta la credencial del proveedor.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    BadGateway:
+      description: El proveedor del agente IA devolvió un error o una respuesta inválida.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    GatewayTimeout:
+      description: El proveedor del agente IA no respondió dentro de `AI_TIMEOUT`.
       content:
         application/json:
           schema:

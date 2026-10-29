@@ -17,7 +17,8 @@
     "react-dom": "^19.0.0"
   },
   "dependencies": {
-    "@tiendas/tracking-core": "*"
+    "@tiendas/tracking-core": "*",
+    "maplibre-gl": "^6.16.0"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

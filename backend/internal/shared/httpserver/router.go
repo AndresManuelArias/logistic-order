@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	authdelivery "tiendas-track/backend/internal/auth/delivery"
+	aidelivery "tiendas-track/backend/internal/aiagent/delivery"
 	ordersdelivery "tiendas-track/backend/internal/orders/delivery"
 	"tiendas-track/backend/internal/shared/httperr"
 	"tiendas-track/backend/internal/shared/middleware"
@@ -33,6 +34,7 @@ type Modules struct {
 	Orders    *ordersdelivery.Handler
 	Stores    *storesdelivery.Handler
 	Telemetry *telemetrydelivery.Handler
+	AI        *aidelivery.Handler
 }
 
 type router struct {
@@ -71,7 +73,7 @@ func NewWithModules(log *slog.Logger, db *pgxpool.Pool, opts Options) http.Handl
 
 	// F2/F3: módulos de negocio tras middleware de autenticación.
 	anyModule := opts.Modules.Auth != nil || opts.Modules.Orders != nil ||
-		opts.Modules.Stores != nil || opts.Modules.Telemetry != nil
+		opts.Modules.Stores != nil || opts.Modules.Telemetry != nil || opts.Modules.AI != nil
 	if opts.Token != nil && anyModule {
 		authenticate := middleware.Authenticate(opts.Token, log)
 		if opts.Modules.Auth != nil {
@@ -87,6 +89,9 @@ func NewWithModules(log *slog.Logger, db *pgxpool.Pool, opts Options) http.Handl
 			opts.Modules.Telemetry.RegisterRoutes(mux, authenticate, middleware.RequireRole)
 			// /ws no cuelga de /api/v1 y autentica el handshake por sí mismo.
 			opts.Modules.Telemetry.RegisterWS(mux)
+		}
+		if opts.Modules.AI != nil {
+			opts.Modules.AI.RegisterRoutes(mux, authenticate, middleware.RequireRole)
 		}
 	} else if opts.Token == nil {
 		log.Warn("router: sin JWT_SECRET/servicio de token; los módulos de negocio no se montan")

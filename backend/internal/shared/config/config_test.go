@@ -23,6 +23,12 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("JWT_ACCESS_TTL", "")
 	t.Setenv("JWT_REFRESH_TTL", "")
 	t.Setenv("GUEST_TOKEN_TTL", "")
+	t.Setenv("AI_ENABLED", "")
+	t.Setenv("AI_BASE_URL", "")
+	t.Setenv("AI_API_KEY", "")
+	t.Setenv("AI_MODEL", "")
+	t.Setenv("AI_TIMEOUT", "")
+	t.Setenv("AI_MAX_STEPS", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -51,6 +57,32 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.BcryptCost != 10 {
 		t.Errorf("BcryptCost = %d, esperado 10", cfg.BcryptCost)
+	}
+	if !cfg.AIEnabled {
+		t.Error("AIEnabled debería ser true por defecto")
+	}
+	if cfg.AIBaseURL != "https://api.openai.com/v1" {
+		t.Errorf("AIBaseURL = %q", cfg.AIBaseURL)
+	}
+	if cfg.AIModel != "gpt-4o-mini" {
+		t.Errorf("AIModel = %q", cfg.AIModel)
+	}
+	if cfg.AITimeout != 20*time.Second {
+		t.Errorf("AITimeout = %v, esperado 20s", cfg.AITimeout)
+	}
+	if cfg.AIMaxSteps != 4 {
+		t.Errorf("AIMaxSteps = %d, esperado 4", cfg.AIMaxSteps)
+	}
+}
+
+// AI_MAX_STEPS fuera de rango es un error de configuración detectable.
+func TestLoadAIMaxStepsInvalido(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/db")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("AI_MAX_STEPS", "99")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("se esperaba error con AI_MAX_STEPS fuera de rango")
 	}
 }
 

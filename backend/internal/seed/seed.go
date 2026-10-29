@@ -237,6 +237,10 @@ func Run(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*Result, er
 // una por minuto, para que `track` tenga una ruta continua que dibujar.
 const demoTrajectoryPoints = 30
 
+// demoStopMinutes es la parada simulada del primer vehículo: deja datos reales
+// para la herramienta get_stopped_vehicles del agente (F5).
+const demoStopMinutes = 25
+
 // seedTelemetry inserta una traza demo para cada vehículo del proveedor seed
 // que aún no tenga muestras recientes. Es idempotente: si el vehículo ya tiene
 // una traza demo (>= demoTrajectoryPoints en las últimas 2 h) se omite, de modo
@@ -299,9 +303,12 @@ func seedTelemetry(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (i
 		}
 
 		// Traza determinista de 30 min (1 muestra/min) con rumbo noreste y
-		// pequeñas variaciones de velocidad, alrededor de Bogotá.
+		// pequeñas variaciones de velocidad, alrededor de Bogotá. El primer
+		// vehículo se detiene los últimos demoStopMinutes minutos para que la
+		// herramienta get_stopped_vehicles tenga una parada vigente.
 		lat := 4.6480 + float64(i)*0.0120
 		lon := -74.0720 + float64(i)*0.0090
+		stopDemo := i == 0
 		var order any
 		if v.orderID != "" {
 			order = v.orderID
@@ -313,19 +320,34 @@ func seedTelemetry(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (i
 			     speed_kph, accuracy_m, heading, source)
 			SELECT date_trunc('minute', now()) - (g * interval '1 minute'),
 			       $1::uuid, 100 + g, $2::uuid,
-			       ST_SetSRID(ST_MakePoint(
-			           $3 + g * 0.00045 + sin(g::float8 / 3.0) * 0.00040,
-			           $4 + g * 0.00030 + cos(g::float8 / 3.0) * 0.00030), 4326),
-			       18 + (g % 7) * 3.5,
+			       CASE WHEN $6::boolean AND g < $7
+			            THEN ST_SetSRID(ST_MakePoint(
+			                     $3 + $7 * 0.00045 + sin($7::float8 / 3.0) * 0.00040,
+			                     $4 + $7 * 0.00030 + cos($7::float8 / 3.0) * 0.00030), 4326)
+			            ELSE ST_SetSRID(ST_MakePoint(
+			                     $3 + g * 0.00045 + sin(g::float8 / 3.0) * 0.00040,
+			                     $4 + g * 0.00030 + cos(g::float8 / 3.0) * 0.00030), 4326)
+			       END,
+			       CASE WHEN $6::boolean AND g < $7 THEN 0 ELSE 18 + (g % 7) * 3.5 END,
 			       5.5,
 			       (45 + g * 3) % 360,
 			       'DEVICE'
 			FROM generate_series(0, $5) AS g
-			ON CONFLICT DO NOTHING`, v.id, order, lon, lat, demoTrajectoryPoints-1)
+			ON CONFLICT DO NOTHING`, v.id, order, lon, lat, demoTrajectoryPoints-1, stopDemo, demoStopMinutes)
 		if err != nil {
 			return total, fmt.Errorf("seed telemetría: %s: %w", v.plate, err)
 		}
 		total += int(tag.RowsAffected())
+	}
+
+	// Refresca el agregado continuo para que una parada recién sembrada esté
+	// disponible de inmediato en get_stopped_vehicles (la política normal tarda
+	// hasta 1 min). Un fallo aquí no invalida el seed.
+	if total > 0 {
+		if _, err := pool.Exec(ctx,
+			`CALL refresh_continuous_aggregate('telemetry.stops', now() - INTERVAL '3 hours', now())`); err != nil {
+			log.Warn("seed: no se pudo refrescar telemetry.stops", "error", err)
+		}
 	}
 
 	log.Info("seed: telemetría demo lista",

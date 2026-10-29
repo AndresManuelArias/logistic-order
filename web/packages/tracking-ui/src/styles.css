@@ -300,39 +300,45 @@
   border: 1px solid var(--tt-border);
   border-radius: var(--tt-radius);
   overflow: hidden;
-  background: #e9eef8;
+  position: relative;
 }
 
-.tt-map__canvas { display: block; width: 100%; height: auto; }
-.tt-map__bg { fill: #e9eef8; }
-.tt-map__grid-line { stroke: #d3dded; stroke-width: 1; }
-
-.tt-map__trail { stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.75; }
-.tt-map__trail--live { stroke: var(--tt-live); }
-.tt-map__trail--pending { stroke: var(--tt-pending); }
-.tt-map__trail--offline { stroke: var(--tt-offline); }
-.tt-map__trail--danger { stroke: var(--tt-danger); }
-.tt-map__trail--neutral { stroke: var(--tt-muted); }
-
-.tt-map__dot { stroke: #fff; stroke-width: 2; }
-.tt-map__marker--live .tt-map__dot { fill: var(--tt-live); }
-.tt-map__marker--pending .tt-map__dot { fill: var(--tt-pending); }
-.tt-map__marker--offline .tt-map__dot { fill: var(--tt-offline); }
-.tt-map__marker--danger .tt-map__dot { fill: var(--tt-danger); }
-.tt-map__marker--neutral .tt-map__dot { fill: var(--tt-muted); }
-
-.tt-map__ring { fill: none; stroke: var(--tt-primary); stroke-width: 2.5; }
-.tt-map__label {
-  font-size: 13px;
-  font-weight: 700;
-  fill: #1b2a41;
-  paint-order: stroke;
-  stroke: #eef2fb;
-  stroke-width: 4px;
-  stroke-linejoin: round;
+.tt-map__canvas {
+  width: 100%;
+  height: 420px;
 }
 
-.tt-map__legend { display: grid; gap: 0.4rem; }
+/* MapLibre markers */
+.tt-map-marker {
+  position: relative;
+  pointer-events: auto;
+}
+
+.tt-map-marker svg {
+  cursor: pointer;
+}
+
+.tt-map-marker-label {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--tt-surface);
+  border: 1px solid var(--tt-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--tt-text);
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+}
+
+.tt-map__legend {
+  display: grid;
+  gap: 0.4rem;
+}
 .tt-map__summary { margin: 0; font-size: 0.8rem; color: var(--tt-muted); }
 
 .tt-map__list {

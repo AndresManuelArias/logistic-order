@@ -32,5 +32,8 @@
     "openapi-typescript": "^7.13.0",
     "typescript": "^5.9.3",
     "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.16.0"
   }
 }

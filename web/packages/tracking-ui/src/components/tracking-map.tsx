@@ -1,11 +1,12 @@
 'use client'
 
-import { useId, useMemo } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import * as maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   DEFAULT_BOUNDS,
   computeBounds,
   padBounds,
-  projectPoint,
   type GeoPoint,
 } from '../lib/geometry'
 import type { Tone } from './status-badge'
@@ -32,12 +33,17 @@ export interface TrackingMapProps {
   summary?: string
 }
 
-const VIEW_WIDTH = 800
 const VIEW_HEIGHT = 420
 
-// Mapa SVG sin dependencia de proveedores de tiles (R3 pendiente). El SVG es
-// decorativo: la lista inferior es la alternativa accesible y operable con
-// teclado, con la misma selección que el mapa.
+// Color mapping for tone -> marker colors
+const toneColors: Record<Tone, string> = {
+  live: '#0f7b4a',
+  pending: '#92400e',
+  neutral: '#52627a',
+  offline: '#5b6b82',
+  danger: '#b42318',
+}
+
 export function TrackingMap({
   markers,
   trails = [],
@@ -46,15 +52,206 @@ export function TrackingMap({
   emptyLabel = 'Sin posiciones para mostrar todavía.',
   summary,
 }: TrackingMapProps) {
-  const rawId = useId()
-  const gridId = `tt-grid-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const mapContainerRef = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<maplibregl.Map | null>(null)
+  const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map())
 
-  const bounds = useMemo(() => {
+  // Compute bounds for the map view
+  const bounds = useCallback(() => {
     const points: GeoPoint[] = [...markers]
     for (const trail of trails) points.push(...trail.points)
     return padBounds(computeBounds(points) ?? DEFAULT_BOUNDS)
   }, [markers, trails])
 
+  // Initialize map on first render
+  useEffect(() => {
+    if (!mapContainerRef.current || mapRef.current) return
+
+    // Use OpenStreetMap raster tiles (free, no API key needed)
+    const style: maplibregl.StyleSpecification = {
+      version: 8,
+      sources: {
+        'osm-tiles': {
+          type: 'raster',
+          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          attribution: '© OpenStreetMap contributors',
+        },
+      },
+      layers: [
+        {
+          id: 'osm-raster',
+          type: 'raster',
+          source: 'osm-tiles',
+        },
+      ],
+    }
+
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: style,
+      center: [-74.05, 4.65], // Bogotá default
+      zoom: 14,
+    })
+
+    map.addControl(new maplibregl.NavigationControl(), 'top-left')
+
+    mapRef.current = map
+
+    return () => {
+      map.remove()
+      mapRef.current = null
+    }
+  }, [])
+
+  // Update map view when bounds change
+  useEffect(() => {
+    if (!mapRef.current) return
+
+    const mapBounds = bounds()
+    const southWest = new maplibregl.LngLat(mapBounds.minLon, mapBounds.minLat)
+    const northEast = new maplibregl.LngLat(mapBounds.maxLon, mapBounds.maxLat)
+
+    mapRef.current.fitBounds([southWest, northEast], {
+      padding: 50,
+      animate: true,
+    })
+  }, [bounds])
+
+  // Update markers
+  useEffect(() => {
+    if (!mapRef.current) return
+
+    const map = mapRef.current
+
+    // Remove markers not in current list
+    const currentIds = new Set(markers.map((m) => m.id))
+    markersRef.current.forEach((marker, id) => {
+      if (!currentIds.has(id)) {
+        marker.remove()
+        markersRef.current.delete(id)
+      }
+    })
+
+    // Add or update markers
+    for (const marker of markers) {
+      const el = document.createElement('div')
+      el.className = 'tt-map-marker'
+      el.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="8" fill="${toneColors[marker.tone ?? 'neutral']}" stroke="#fff" stroke-width="2"/>
+          ${selectedId === marker.id ? '<circle cx="12" cy="12" r="6" fill="#1d4ed8"/>' : ''}
+        </svg>
+        <div class="tt-map-marker-label">${marker.label}</div>
+      `
+
+      let mapMarker = markersRef.current.get(marker.id)
+      if (!mapMarker) {
+        mapMarker = new maplibregl.Marker(el).setLngLat([marker.lon, marker.lat]).addTo(map)
+        markersRef.current.set(marker.id, mapMarker)
+      } else {
+        mapMarker.setLngLat([marker.lon, marker.lat])
+      }
+
+      el.style.cursor = 'pointer'
+      el.onclick = () => {
+        if (onSelect) onSelect(marker.id)
+      }
+    }
+
+    return () => {
+      markersRef.current.forEach((marker) => marker.remove())
+      markersRef.current.clear()
+    }
+  }, [markers, selectedId, onSelect])
+
+  // Update trails using GeoJSON source
+  useEffect(() => {
+    if (!mapRef.current) return
+
+    const map = mapRef.current
+
+    // Remove old trail layers and sources
+    if (map.getSource('trails-source')) {
+      map.removeSource('trails-source')
+    }
+
+    const style = map.getStyle()
+    if (style && style.layers) {
+      const layersToRemove: string[] = []
+      style.layers.forEach((layer) => {
+        if (layer.id.startsWith('trail-')) {
+          layersToRemove.push(layer.id)
+        }
+      })
+      layersToRemove.forEach((id) => map.removeLayer(id))
+    }
+
+    if (trails.length === 0) return
+
+    // Create GeoJSON data for trails
+    const features = trails
+      .filter((t) => t.points.length >= 2)
+      .map((trail) => ({
+        type: 'Feature' as const,
+        properties: {
+          id: trail.id,
+          tone: trail.tone ?? 'live',
+        },
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: trail.points.map((p) => [p.lon, p.lat]),
+        },
+      }))
+
+    map.addSource('trails-source', {
+      type: 'geojson',
+      data: {
+        type: 'FeatureCollection' as const,
+        features,
+      },
+    })
+
+    // Add trail layer for all trails
+    map.addLayer({
+      id: 'trail-all',
+      type: 'line',
+      source: 'trails-source',
+      paint: {
+        'line-color': '#888',
+        'line-width': 3,
+        'line-opacity': 0.5,
+      },
+    })
+
+    // Add selected trail layer
+    map.addLayer({
+      id: 'trail-selected',
+      type: 'line',
+      source: 'trails-source',
+      filter: ['==', ['get', 'id'], selectedId ?? 'none'],
+      paint: {
+        'line-color': toneColors.live,
+        'line-width': 4,
+        'line-opacity': 1,
+      },
+    })
+
+    return () => {
+      const style = map.getStyle()
+      if (style && style.layers) {
+        const layersToRemove: string[] = []
+        style.layers.forEach((layer) => {
+          if (layer.id.startsWith('trail-')) {
+            layersToRemove.push(layer.id)
+          }
+        })
+        layersToRemove.forEach((id) => map.removeLayer(id))
+      }
+    }
+  }, [trails, selectedId])
+
+  // Show empty state if no data
   if (markers.length === 0 && trails.every((trail) => trail.points.length === 0)) {
     return (
       <div className="tt-map tt-map--empty" role="status">
@@ -63,63 +260,25 @@ export function TrackingMap({
     )
   }
 
-  const project = (point: GeoPoint) => projectPoint(point, bounds, VIEW_WIDTH, VIEW_HEIGHT)
   const heading = summary ?? `${markers.length} vehículo(s) en el mapa`
 
   return (
     <div className="tt-map">
-      <div className="tt-map__viewport" aria-hidden="true">
-        <svg viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`} className="tt-map__canvas" focusable="false">
-          <defs>
-            <pattern id={gridId} width="50" height="50" patternUnits="userSpaceOnUse">
-              <path d="M 50 0 L 0 0 0 50" className="tt-map__grid-line" fill="none" />
-            </pattern>
-          </defs>
-          <rect width={VIEW_WIDTH} height={VIEW_HEIGHT} className="tt-map__bg" />
-          <rect width={VIEW_WIDTH} height={VIEW_HEIGHT} fill={`url(#${gridId})`} />
-
-          {trails.map((trail) => {
-            if (trail.points.length < 2) return null
-            const path = trail.points
-              .map((point) => {
-                const { x, y } = project(point)
-                return `${x.toFixed(1)},${y.toFixed(1)}`
-              })
-              .join(' ')
-            return (
-              <polyline
-                key={trail.id}
-                points={path}
-                className={`tt-map__trail tt-map__trail--${trail.tone ?? 'live'}`}
-                fill="none"
-              />
-            )
-          })}
-
-          {markers.map((marker) => {
-            const { x, y } = project(marker)
-            const tone = marker.tone ?? 'neutral'
-            const selected = marker.id === selectedId
-            return (
-              <g key={marker.id} className={`tt-map__marker-group tt-map__marker--${tone}`}>
-                {selected ? <circle cx={x} cy={y} r={16} className="tt-map__ring" /> : null}
-                <circle cx={x} cy={y} r={selected ? 10 : 8} className="tt-map__dot" />
-                <text x={x} y={y - 18} textAnchor="middle" className="tt-map__label">
-                  {marker.label}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
-      </div>
+      <div
+        ref={mapContainerRef}
+        className="tt-map__viewport tt-map__canvas"
+        aria-hidden="true"
+        style={{ width: '100%', height: `${VIEW_HEIGHT}px` }}
+      />
 
       <div className="tt-map__legend">
         <p className="tt-map__summary">{heading}</p>
         <ul className="tt-map__list">
           {markers.map((marker) => {
+            const tone = marker.tone ?? 'neutral'
             const content = (
               <>
-                <span className={`tt-dot tt-dot--${marker.tone ?? 'neutral'}`} aria-hidden="true" />
+                <span className={`tt-dot tt-dot--${tone}`} aria-hidden="true" />
                 <span className="tt-map__item-text">
                   <strong>{marker.label}</strong>
                   {marker.detail ? <span>{marker.detail}</span> : null}

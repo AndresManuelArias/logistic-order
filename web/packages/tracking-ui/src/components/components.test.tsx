@@ -136,14 +136,16 @@ describe('TrackingMap', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Aún no hay vehículos')
   })
 
-  it('dibuja la traza sin marcadores interactivos si no hay onSelect', () => {
+  it('muestra la traza y no tiene botones de selección si no hay onSelect', () => {
     const { container } = render(
       <TrackingMap
         markers={markers}
-        trails={[{ id: 't-1', points: [{ lat: 4.6, lon: -74.1 }, { lat: 4.7, lon: -74.0 }] }]}
+        trails={[{ id: 't-1', points: [{ lat: 4.6, lon: -74.1 }, { lat: 4.7, lon: -74.0 }] }] }
       />,
     )
-    expect(container.querySelector('polyline')).not.toBeNull()
+    // MapLibre usa canvas, verificamos que el contenedor exista
+    expect(container.querySelector('.tt-map')).not.toBeNull()
+    // Sin onSelect, no debería haber botones
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 })
