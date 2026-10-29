@@ -90,6 +90,13 @@ func (uc *StoresUseCase) Create(ctx context.Context, p authz.Principal, in Creat
 }
 
 // Me devuelve la tienda del usuario autenticado (ErrNotFound si aún no existe).
+func (uc *StoresUseCase) List(ctx context.Context, p authz.Principal) ([]domain.Store, error) {
+	if p.IsGuest() || !p.HasRole(authz.RoleProvider) {
+		return nil, domain.ErrForbiddenScope
+	}
+	return uc.stores.List(ctx, 200)
+}
+
 func (uc *StoresUseCase) Me(ctx context.Context, p authz.Principal) (*domain.Store, error) {
 	traceID, _ := tracing.CorrelationIDFromContext(ctx)
 	uc.log.Info("Me: consultando tienda del usuario",

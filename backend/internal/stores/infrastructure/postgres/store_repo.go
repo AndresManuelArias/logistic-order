@@ -58,6 +58,57 @@ func (r *StoreRepository) FindByOwner(ctx context.Context, userID string) (*doma
 	return &s, nil
 }
 
+func (r *StoreRepository) List(ctx context.Context, f domain.ListFilter) ([]domain.Store, int, error) {
+	limit := f.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Construye WHERE dinámico según si hay filtro de nombre.
+	var (
+		countQuery string
+		listQuery  string
+		args       []any
+	)
+	if strings.TrimSpace(f.Name) != "" {
+		args = []any{"%" + strings.ToLower(strings.TrimSpace(f.Name)) + "%", limit, offset}
+		countQuery = `SELECT count(*) FROM app.stores WHERE lower(name) LIKE $1`
+		listQuery = `SELECT ` + storeCols + ` FROM app.stores WHERE lower(name) LIKE $1 ORDER BY name LIMIT $2 OFFSET $3`
+	} else {
+		args = []any{limit, offset}
+		countQuery = `SELECT count(*) FROM app.stores`
+		listQuery = `SELECT ` + storeCols + ` FROM app.stores ORDER BY name LIMIT $1 OFFSET $2`
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx, countQuery, args[:len(args)-2]...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("stores.list.count: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, listQuery, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("stores.list: %w", err)
+	}
+	defer rows.Close()
+
+	stores := make([]domain.Store, 0, limit)
+	for rows.Next() {
+		var s domain.Store
+		if err := rows.Scan(&s.ID, &s.Name, &s.OwnerUserID, &s.Address, &s.Lat, &s.Lon, &s.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("stores.list.scan: %w", err)
+		}
+		stores = append(stores, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("stores.list.rows: %w", err)
+	}
+	return stores, total, nil
+}
+
 func isUniqueViolation(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" &&

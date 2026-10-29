@@ -17,10 +17,12 @@ import (
 
 	aidelivery "tiendas-track/backend/internal/aiagent/delivery"
 	authdelivery "tiendas-track/backend/internal/auth/delivery"
+	driversdelivery "tiendas-track/backend/internal/drivers/delivery"
 	ordersdelivery "tiendas-track/backend/internal/orders/delivery"
 	"tiendas-track/backend/internal/shared/httperr"
 	"tiendas-track/backend/internal/shared/middleware"
 	"tiendas-track/backend/internal/shared/openapi"
+	"tiendas-track/backend/internal/shared/ratelimit"
 	"tiendas-track/backend/internal/shared/token"
 	storesdelivery "tiendas-track/backend/internal/stores/delivery"
 	telemetrydelivery "tiendas-track/backend/internal/telemetry/delivery"
@@ -35,6 +37,7 @@ type Modules struct {
 	Stores    *storesdelivery.Handler
 	Telemetry *telemetrydelivery.Handler
 	AI        *aidelivery.Handler
+	Drivers   *driversdelivery.Handler
 }
 
 type router struct {
@@ -48,6 +51,19 @@ type Options struct {
 	Token *token.Service
 	// Modules son los handlers de negocio (auth, orders).
 	Modules Modules
+	// RateLimits protege login, ingesta de telemetría y agente IA (§9.4).
+	// Si es nil, no se aplica limitación (modo test / despliegue sin límites).
+	RateLimits *RateLimits
+}
+
+// RateLimits agrupa los limitadores por superficie sensible (F6).
+type RateLimits struct {
+	Login     *ratelimit.Limiter
+	Telemetry *ratelimit.Limiter
+	AI        *ratelimit.Limiter
+	// TrustProxy permite usar X-Forwarded-For/X-Real-IP como clave de IP.
+	// Solo debe activarse detrás de un proxy de confianza (ALB/ingress).
+	TrustProxy bool
 }
 
 // New construye el handler raíz del servidor (solo operabilidad, F1).
@@ -73,7 +89,8 @@ func NewWithModules(log *slog.Logger, db *pgxpool.Pool, opts Options) http.Handl
 
 	// F2/F3: módulos de negocio tras middleware de autenticación.
 	anyModule := opts.Modules.Auth != nil || opts.Modules.Orders != nil ||
-		opts.Modules.Stores != nil || opts.Modules.Telemetry != nil || opts.Modules.AI != nil
+		opts.Modules.Stores != nil || opts.Modules.Telemetry != nil || opts.Modules.AI != nil ||
+		opts.Modules.Drivers != nil
 	if opts.Token != nil && anyModule {
 		authenticate := middleware.Authenticate(opts.Token, log)
 		if opts.Modules.Auth != nil {
@@ -93,11 +110,62 @@ func NewWithModules(log *slog.Logger, db *pgxpool.Pool, opts Options) http.Handl
 		if opts.Modules.AI != nil {
 			opts.Modules.AI.RegisterRoutes(mux, authenticate, middleware.RequireRole)
 		}
+		if opts.Modules.Drivers != nil {
+			opts.Modules.Drivers.RegisterRoutes(mux, authenticate, middleware.RequireRole)
+		}
 	} else if opts.Token == nil {
 		log.Warn("router: sin JWT_SECRET/servicio de token; los módulos de negocio no se montan")
 	}
 
-	return r.logging(r.recover(tracing.TracingMiddleware(mux)))
+	return r.logging(r.recover(tracing.TracingMiddleware(r.rateLimit(mux, opts.RateLimits, opts.Token))))
+}
+
+// rateLimit aplica el limitador correspondiente a cada superficie sensible.
+// Se ejecuta antes del mux: para telemetría/IA intenta derivar la clave del
+// Bearer (el token se valida de nuevo en el middleware de autenticación) y
+// cae a la IP si no hay token válido. Login siempre limita por IP.
+func (r *router) rateLimit(next http.Handler, limits *RateLimits, tokens *token.Service) http.Handler {
+	if limits == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var (
+			limiter *ratelimit.Limiter
+			scope   string
+		)
+		switch req.URL.Path {
+		case "/api/v1/auth/login":
+			limiter, scope = limits.Login, "login"
+		case "/api/v1/telemetry/points", "/api/v1/telemetry/bulk":
+			limiter, scope = limits.Telemetry, "telemetry"
+		case "/api/v1/ai/query":
+			limiter, scope = limits.AI, "ai"
+		default:
+			next.ServeHTTP(w, req)
+			return
+		}
+		if limiter == nil {
+			next.ServeHTTP(w, req)
+			return
+		}
+
+		key := ratelimit.ClientIP(req, limits.TrustProxy)
+		if scope != "login" && tokens != nil {
+			if raw, ok := middleware.BearerToken(req); ok {
+				if p, err := middleware.PrincipalFromToken(tokens, raw); err == nil && p.UserID != "" {
+					key = p.UserID
+				}
+			}
+		}
+
+		allowed, retryAfter := limiter.Allow(ratelimit.FixedWindowKey(scope, key))
+		if !allowed {
+			r.log.Warn("rate limit excedido", "scope", scope, "client", key, "retry_after", retryAfter.String())
+			httperr.TooManyRequests(w, retryAfter)
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
 }
 
 // healthz: liveness. No toca la base de datos: sirve para saber si el

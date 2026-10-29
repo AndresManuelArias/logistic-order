@@ -36,7 +36,8 @@ type CreateOrderInput struct {
 	DestinationAddress string
 }
 
-// Create registra una orden nueva (rol STORE, solo su propia tienda).
+// Create registra una orden nueva. STORE crea para su propia tienda; PROVIDER
+// puede crear una orden atribuida a una tienda existente en su operación.
 func (uc *OrdersUseCase) Create(ctx context.Context, p authz.Principal, in CreateOrderInput) (*domain.Order, error) {
 	traceID, _ := tracing.CorrelationIDFromContext(ctx)
 	uc.log.Info("Create: iniciando creación de orden",
@@ -46,7 +47,7 @@ func (uc *OrdersUseCase) Create(ctx context.Context, p authz.Principal, in Creat
 		"user_id", p.UserID,
 	)
 
-	if p.IsGuest() || !p.HasRole(authz.RoleStore) {
+	if p.IsGuest() || (!p.HasRole(authz.RoleStore) && !p.HasRole(authz.RoleProvider)) {
 		uc.log.Error("Create: error de autorización",
 			"trace_id", traceID,
 			"error", domain.ErrForbiddenScope.Error(),
@@ -67,18 +68,24 @@ func (uc *OrdersUseCase) Create(ctx context.Context, p authz.Principal, in Creat
 		)
 		return nil, fmt.Errorf("%w: coordenadas inválidas", domain.ErrValidation)
 	}
-	// Aislamiento de datos: la orden pertenece a la tienda del principal (RF-02).
-	if in.StoreID == "" {
-		in.StoreID = p.StoreID
-	}
-	// Un principal sin tienda asociada (registro incompleto/ dato corrupto)
-	// no puede operar: se rechaza como scope en lugar de fallar en SQL.
-	if p.StoreID == "" || in.StoreID != p.StoreID {
-		uc.log.Error("Create: error de alcance",
-			"trace_id", traceID,
-			"error", "store_id no coincide con el principal",
-		)
-		return nil, domain.ErrForbiddenScope
+	if p.HasRole(authz.RoleStore) {
+		// Aislamiento de datos: una tienda solo puede crear para sí misma.
+		if in.StoreID == "" {
+			in.StoreID = p.StoreID
+		}
+		if p.StoreID == "" || in.StoreID != p.StoreID {
+			uc.log.Error("Create: error de alcance",
+				"trace_id", traceID,
+				"error", "store_id no coincide con el principal",
+			)
+			return nil, domain.ErrForbiddenScope
+		}
+	} else {
+		// PROVIDER necesita una tienda existente. La asociación se valida al crear
+		// la orden y la asignación posterior sigue limitada a la flota del proveedor.
+		if p.ProviderID == "" || in.StoreID == "" {
+			return nil, domain.ErrForbiddenScope
+		}
 	}
 
 	exists, err := uc.orders.StoreExists(ctx, in.StoreID)

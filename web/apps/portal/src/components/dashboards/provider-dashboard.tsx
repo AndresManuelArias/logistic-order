@@ -26,6 +26,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '@/components/auth-provider'
 import { AiAssistant } from '@/components/ai-assistant'
+import { AssignOrderForm } from '@/components/assign-order-form'
+import { ProviderCreateOrderForm } from '@/components/provider-create-order-form'
 import { useApiResource } from '@/hooks/use-api-resource'
 import { usePageTracking } from '@/hooks/use-page-tracking'
 
@@ -50,6 +52,8 @@ export function ProviderDashboard() {
     reloadKey: user?.id ?? '',
   })
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // ID de la orden que tiene el formulario de asignación abierto.
+  const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null)
 
   const tracking = usePageTracking(user ? [fleetProviderChannel(user.id)] : [])
 
@@ -129,6 +133,15 @@ export function ProviderDashboard() {
   const delivered = orderItems.filter((order) => order.status === 'DELIVERED').length
   const withoutSignal = vehicles.filter((vehicle) => vehicleTone(vehicle) !== 'live').length
   const plates = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle.plate]))
+
+  // Órdenes pendientes de asignación: estado CREATED sin vehículo asignado.
+  const pendingAssignment = orderItems.filter(
+    (order) => order.status === 'CREATED' && !order.assigned_vehicle_id,
+  )
+  // Órdenes ya asignadas o en otro estado.
+  const assignedOrders = orderItems.filter(
+    (order) => order.status !== 'CREATED' || Boolean(order.assigned_vehicle_id),
+  )
 
   function refreshAll() {
     fleet.reload()
@@ -317,27 +330,88 @@ export function ProviderDashboard() {
         </div>
       ) : null}
 
-      <section className="tt-card" aria-labelledby="fleet-orders-title">
+      {/* Creación directa: la orden se crea y asigna en una sola operación. */}
+      <section className="tt-card" aria-labelledby="create-provider-order-title">
         <div className="tt-section__head">
-          <h2 className="tt-section__title" id="fleet-orders-title">
-            Órdenes de mi flota
+          <h2 className="tt-section__title" id="create-provider-order-title">Órdenes</h2>
+          <ProviderCreateOrderForm vehicles={vehicles} onCreated={orders.reload} />
+        </div>
+      </section>
+
+      {/* Sección: órdenes pendientes de asignación (CREATED sin vehículo) */}
+      <section className="tt-card" aria-labelledby="pending-orders-title">
+        <div className="tt-section__head">
+          <h2 className="tt-section__title" id="pending-orders-title">
+            Órdenes pendientes de asignación
           </h2>
-          <span className="tt-section__hint">{orderItems.length} órdenes visibles</span>
+          <span className="tt-section__hint">{pendingAssignment.length} sin asignar</span>
         </div>
 
         {orders.error ? <ErrorPanel error={orders.error} onRetry={orders.reload} /> : null}
         {orders.loading && !orders.data ? <LoadingPanel label="Cargando órdenes…" /> : null}
 
-        {orders.data && orderItems.length === 0 ? (
+        {orders.data && pendingAssignment.length === 0 ? (
           <EmptyState
-            title="Sin órdenes asignadas"
-            description="Cuando los vehículos de tu flota tengan órdenes asignadas, aparecerán aquí con su estado."
+            title="Sin órdenes pendientes"
+            description="Todas las órdenes ya tienen un vehículo y conductor asignados."
           />
         ) : null}
 
-        {orderItems.length > 0 ? (
+        {pendingAssignment.length > 0 ? (
           <ul className="tt-list">
-            {orderItems.map((order: Order) => (
+            {pendingAssignment.map((order: Order) => (
+              <li key={order.id}>
+                {assigningOrderId === order.id ? (
+                  <AssignOrderForm
+                    order={order}
+                    vehicles={vehicles}
+                    onAssigned={() => {
+                      setAssigningOrderId(null)
+                      orders.reload()
+                    }}
+                    onCancel={() => setAssigningOrderId(null)}
+                  />
+                ) : (
+                  <OrderCard
+                    order={order}
+                    vehiclePlate={undefined}
+                    actions={
+                      <button
+                        type="button"
+                        className="tt-button tt-button--primary"
+                        onClick={() => setAssigningOrderId(order.id)}
+                        aria-label={`Asignar orden ${order.external_ref}`}
+                      >
+                        Asignar
+                      </button>
+                    }
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
+      {/* Sección: órdenes ya asignadas / en curso / históricas */}
+      <section className="tt-card" aria-labelledby="fleet-orders-title">
+        <div className="tt-section__head">
+          <h2 className="tt-section__title" id="fleet-orders-title">
+            Órdenes de mi flota
+          </h2>
+          <span className="tt-section__hint">{assignedOrders.length} órdenes</span>
+        </div>
+
+        {assignedOrders.length === 0 && orders.data ? (
+          <EmptyState
+            title="Sin órdenes asignadas"
+            description="Las órdenes asignadas a tu flota aparecerán aquí."
+          />
+        ) : null}
+
+        {assignedOrders.length > 0 ? (
+          <ul className="tt-list">
+            {assignedOrders.map((order: Order) => (
               <li key={order.id}>
                 <OrderCard
                   order={order}

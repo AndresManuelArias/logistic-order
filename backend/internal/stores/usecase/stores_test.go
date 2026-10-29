@@ -36,6 +36,17 @@ func (f *fakeStoreRepo) FindByOwner(_ context.Context, userID string) (*domain.S
 	return s, nil
 }
 
+func (f *fakeStoreRepo) List(_ context.Context, limit int) ([]domain.Store, error) {
+	stores := make([]domain.Store, 0, len(f.byOwner))
+	for _, store := range f.byOwner {
+		stores = append(stores, *store)
+		if len(stores) == limit {
+			break
+		}
+	}
+	return stores, nil
+}
+
 // nullWriter descarta la salida del logger en tests.
 type nullWriter struct{}
 

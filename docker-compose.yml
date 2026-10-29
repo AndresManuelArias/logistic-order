@@ -57,6 +57,12 @@ services:
       AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
       AI_TIMEOUT: ${AI_TIMEOUT:-20s}
       AI_MAX_STEPS: ${AI_MAX_STEPS:-4}
+      # F6: rate limiting (§9.4). Por IP en login y por usuario en telemetría/IA.
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_LOGIN_PER_MIN: ${RATE_LIMIT_LOGIN_PER_MIN:-10}
+      RATE_LIMIT_TELEMETRY_PER_MIN: ${RATE_LIMIT_TELEMETRY_PER_MIN:-120}
+      RATE_LIMIT_AI_PER_MIN: ${RATE_LIMIT_AI_PER_MIN:-10}
+      RATE_LIMIT_TRUST_PROXY: ${RATE_LIMIT_TRUST_PROXY:-false}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     restart: unless-stopped

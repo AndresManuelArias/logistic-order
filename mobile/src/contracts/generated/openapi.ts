@@ -498,6 +498,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Consulta en lenguaje natural al agente operativo (RF-10)
+         * @description Roles `PROVIDER`, `STORE` y `DRIVER`; los invitados reciben `403`.
+         *
+         *     El agente traduce la pregunta a un **catálogo cerrado de herramientas**
+         *     (`get_stopped_vehicles`, `get_order_status`, `get_fleet_eta`,
+         *     `get_late_deliveries`). Nunca ejecuta SQL libre y el ámbito de datos se
+         *     aplica en el servidor según el rol del token.
+         *
+         *     Cada consulta se audita en `app.ai_query_log` con la pregunta, las
+         *     herramientas y argumentos usados, el resultado, el modelo y la latencia.
+         *
+         *     **Degradación controlada:** sin `AI_API_KEY` (o con `AI_ENABLED=false`)
+         *     responde `503 AI_NOT_CONFIGURED`; con el circuito abierto responde
+         *     `503 CIRCUIT_OPEN` y `Retry-After`; un fallo del proveedor responde
+         *     `502 AI_PROVIDER_ERROR`; un timeout responde `504 AI_TIMEOUT`.
+         */
+        post: operations["queryAi"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -720,6 +753,35 @@ export interface components {
             count: number;
             points: components["schemas"]["TelemetryPoint"][];
         };
+        AiQueryRequest: {
+            /** @description Pregunta en lenguaje natural sobre la operación del usuario. */
+            question: string;
+        };
+        AiToolInvocation: {
+            /** @example get_stopped_vehicles */
+            name: string;
+            /** @description Argumentos validados que se enviaron a la herramienta. */
+            arguments?: {
+                [key: string]: unknown;
+            };
+            ok: boolean;
+            /** @description Mensaje saneado cuando la herramienta falló. */
+            error?: string;
+            duration_ms: number;
+        };
+        AiQueryResponse: {
+            /** @description Respuesta final del agente basada solo en datos de herramientas. */
+            answer: string;
+            /** @description Primera herramienta ejecutada con éxito (si hubo). */
+            tool?: string;
+            tools?: components["schemas"]["AiToolInvocation"][];
+            model?: string;
+            /**
+             * Format: uuid
+             * @description Identificador del registro en `app.ai_query_log`.
+             */
+            audit_id?: string;
+        };
     };
     responses: {
         /** @description Cuerpo JSON malformado o entrada no legible. */
@@ -778,9 +840,43 @@ export interface components {
         };
         /**
          * @description Dependencia degradada. En telemetría indica circuit breaker abierto
-         *     (`503 CIRCUIT_OPEN`); incluye `Retry-After`.
+         *     (`503 CIRCUIT_OPEN`); incluye `Retry-After`. En el agente IA también
+         *     cubre `AI_NOT_CONFIGURED` cuando falta la credencial del proveedor.
          */
         ServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /**
+         * @description Límite de peticiones superado (`429 RATE_LIMITED`). Se aplica por IP en
+         *     el login y por usuario autenticado (fallback IP) en telemetría y agente
+         *     IA. La cabecera `Retry-After` indica los segundos mínimos de espera.
+         */
+        TooManyRequests: {
+            headers: {
+                /** @description Segundos que el cliente debe esperar antes de reintentar. */
+                "Retry-After"?: number;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description El proveedor del agente IA devolvió un error o una respuesta inválida. */
+        BadGateway: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description El proveedor del agente IA no respondió dentro de `AI_TIMEOUT`. */
+        GatewayTimeout: {
             headers: {
                 [name: string]: unknown;
             };
@@ -949,6 +1045,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
         };
     };
     refreshToken: {
@@ -1324,6 +1421,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -1331,10 +1429,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /**
-                 * @description Clave idempotente del lote (generada por el dispositivo).
-                 * @example device-8f3a-batch-0001
-                 */
+                /** @description Clave idempotente del lote (generada por el dispositivo). */
                 "Idempotency-Key": string;
             };
             path?: never;
@@ -1359,6 +1454,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -1553,6 +1649,43 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthenticated"];
+        };
+    };
+    queryAi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "question": "¿Qué vehículos llevan más de 20 minutos detenidos?"
+                 *     }
+                 */
+                "application/json": components["schemas"]["AiQueryRequest"];
+            };
+        };
+        responses: {
+            /** @description Respuesta del agente con las herramientas invocadas. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiQueryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
 }

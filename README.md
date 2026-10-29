@@ -431,6 +431,21 @@ backend real (mismo lote con la misma clave → `already_processed: true`, sin
 puntos duplicados). Limitaciones y supuestos detallados en
 [`mobile/README.md`](mobile/README.md).
 
+## Carga, IaC y CI/CD (F6)
+
+- **Carga (k6):** `scripts/load/k6_f6.js` simula 100+ vehículos, 5% de
+  duplicados exactos y 1% de payloads inválidos, con escenario WebSocket y
+  umbrales p95 < 500 ms. Guía en [`scripts/load/README.md`](scripts/load/README.md).
+- **Rate limiting:** login por IP y telemetría/IA por usuario, con `429
+  RATE_LIMITED` y `Retry-After`; configurable con `RATE_LIMIT_*`.
+- **IaC:** [`infra/terraform`](infra/README.md) crea VPC, ALB, ECS Fargate, RDS
+  PostgreSQL 16 y Secrets Manager. `terraform plan` offline validado; RDS no
+  soporta TimescaleDB (ruta de producción documentada).
+- **CI/CD:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) ejecuta
+  backend (gofmt/vet/test/build), web (tipos/lint/tests/build/contrato), móvil
+  (tipos/tests/bundle Expo), Fastlane, Spectral, Terraform, Docker y escaneos.
+- **Auditoría de seguridad:** [`doc/seguridad/auditoria_f6.md`](doc/seguridad/auditoria_f6.md).
+
 ## Datos de demostración (seed)
 
 ```bash
@@ -483,6 +498,12 @@ make lint-web  # typecheck + lint + build de producción del portal
 make test-mobile # pruebas de la app móvil offline-first (99)
 make lint-mobile # typecheck de la app móvil
 make gen-mobile-api # regenera tipos OpenAPI de la app móvil
+make seed-load # siembra 100 vehículos LOAD-* para k6
+make load-test # k6 vía Docker (backend en :8082)
+make contract  # lint OpenAPI con Spectral + pruebas del contrato
+make iac-validate # terraform fmt + init + validate
+make iac-plan  # terraform plan offline (sin credenciales AWS)
+make ci-local  # replica los jobs principales del CI
 make clean     # baja el stack y BORRA los volúmenes locales
 ```
 
@@ -569,6 +590,7 @@ backend/
 │   ├── eventbus/                  # pub/sub en memoria (Go channels, no bloqueante)
 │   ├── resilience/                # circuit breaker (gobreaker) de lecturas
 │   ├── websocket/                 # hub /ws: concesiones, fan-out, límites
+│   ├── ratelimit/                 # F6: token bucket y middleware 429/Retry-After
 │   └── openapi/                   # sirve spec + Swagger UI embebidos
 ├── internal/auth/                 # F2: registro, login, refresh rotativo, guest
 ├── internal/orders/               # F2: órdenes, máquina de estados, asignación
@@ -580,6 +602,11 @@ backend/
 └── pkg/logger/                    # slog estructurado
 scripts/e2e_f2.sh                  # e2e de la F2 (72 casos)
 scripts/e2e_f3.sh                  # e2e de la F3 (63 casos)
+scripts/load/                      # F6: k6 (carga, duplicados, errores, WS) + seed
+scripts/contract/                  # F6: lint OpenAPI (Spectral + pruebas Go)
+infra/terraform/                   # F6: AWS (VPC, RDS, ECS Fargate, ALB, secretos)
+.github/workflows/ci.yml           # F6: backend, web, móvil, Fastlane, IaC, contrato
+doc/seguridad/auditoria_f6.md      # F6: auditoría de seguridad (checklist §9.4)
 web/                               # portal Next.js + librerías compartidas (F4)
 ├── apps/portal/                   # rutas, BFF y paneles por rol
 ├── packages/tracking-core/        # cliente OpenAPI, WS y hook useTracking
@@ -614,10 +641,62 @@ Las migraciones se aplican automáticamente al arrancar el backend (`MIGRATE_ON_
 | F3 — Telemetría y WebSockets | ✅ Completada (2026-10-28) |
 | F4 — Portal y app móvil | ✅ Implementados (2026-10-28); validación en dispositivo pendiente (sin emulador/SDK) |
 | F5 — Agente IA | ✅ Implementado (2026-10-29); prueba con proveedor real pendiente (sin API key en el entorno) |
-| F6 — Carga, IaC y CI/CD | ⬜ Pendiente |
+| F6 — Carga, IaC y CI/CD | ✅ Implementado (2026-10-29); `apply` AWS y build nativo móvil pendientes (sin credenciales/macOS) |
 
 ## Problemas comunes
 
 - **`No space left on device`**: Docker necesita espacio en `/var/lib/docker`. Revisa `docker system df` y libera imágenes/caché no usadas.
 - **Puerto ocupado**: cambia `BACKEND_PORT`, `WEB_PORT` o `DB_PORT` en `.env`.
 - **BD en bucle de reinicio**: revisa `docker compose logs db`; si el volumen quedó corrupto tras un fallo de disco, `make clean` lo recrea (borra datos locales).
+
+## Auditoría del uso de la IA
+
+Este proyecto usó asistentes de IA para generar y revisar código. La auditoría
+no evalúa «si se usó IA», sino qué se aceptó, qué se rechazó y cómo se verificó.
+Los dos casos siguientes son verificables en el repositorio.
+
+### Caso 1 — El par de tokens exponía `PasswordHash`
+
+- **Propuesta inicial:** devolver el `domain.User` completo dentro de
+  `TokenPair`, reutilizando el modelo de persistencia como respuesta HTTP.
+- **Riesgo:** el campo `PasswordHash` (bcrypt) viajaba al cliente en cada login
+  y registro, junto con nombres de campo internos. Un atacante con acceso a
+  logs, cachés o al cuerpo de la respuesta obtenía hashes para atacar offline.
+- **Criterio aplicado:** el dominio no se serializa; la capa HTTP proyecta un
+  DTO explícito (`toTokenPairResponse`) con solo `id`, `email`, `full_name` y
+  `role`. Se añadió una prueba de regresión que falla si aparece el hash o los
+  nombres del dominio.
+- **Resultado verificable:** `backend/internal/auth/delivery/http_test.go`
+  (`TestToTokenPairResponseMatchesContract`) y la proyección en
+  `backend/internal/auth/delivery/http.go`. La prueba se ejecuta en
+  `go test ./...` y en el job `backend` del CI.
+
+### Caso 2 — El agente IA no ejecuta SQL libre y respeta el alcance del rol
+
+- **Propuesta inicial:** dejar que el modelo generara SQL o, en su defecto, un
+  «fallback determinista» que respondiera sin LLM para que la demo siempre
+  funcionara.
+- **Riesgo:** SQL generado por un modelo es una superficie de inyección y de
+  fuga entre proveedores/tiendas; un fallback que inventa respuestas rompe la
+  trazabilidad y oculta fallos de configuración.
+- **Criterio aplicado:** catálogo cerrado de cuatro herramientas de solo lectura
+  (`get_stopped_vehicles`, `get_order_status`, `get_fleet_eta`,
+  `get_late_deliveries`), parámetros validados y ámbito aplicado en SQL según el
+  principal. Sin `AI_API_KEY` se responde `503 AI_NOT_CONFIGURED` y se audita;
+  nunca se simula una respuesta. Además, la revisión detectó que
+  `get_stopped_vehicles` no comprobaba el alcance `STORE`; se corrigió con un
+  `EXISTS` sobre las órdenes de la tienda.
+- **Resultado verificable:** `backend/internal/aiagent/domain/agent.go`
+  (catálogo), `backend/internal/aiagent/infrastructure/postgres/analytics_repo.go`
+  (scope por rol), `backend/migrations/0007_ai_audit.sql` (auditoría) y
+  `doc/arquitectura/monolito_modular/f5_agente_ia.md` (diseño y evidencia).
+
+### Lecciones aplicadas
+
+1. **La IA propone, el contrato decide:** toda salida de modelo pasa por DTOs,
+   catálogo cerrado y validación de dominio.
+2. **Pruebas de regresión para cada hallazgo:** los tres casos anteriores tienen
+   una prueba o un E2E que falla si el problema reaparece.
+3. **La seguridad se revisa con herramientas, no con confianza:**
+   `govulncheck`, `npm audit`, Spectral y la auditoría de
+   `doc/seguridad/auditoria_f6.md` se ejecutan en CI.

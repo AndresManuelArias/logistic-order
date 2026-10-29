@@ -194,6 +194,39 @@ func TestSpecContratoAgenteIA(t *testing.T) {
 	}
 }
 
+// Las superficies sensibles deben documentar 429 y la cabecera Retry-After
+// (rate limiting del checklist §9.4).
+func TestSpecRateLimitDocumentado(t *testing.T) {
+	var doc struct {
+		Paths      map[string]map[string]any `yaml:"paths"`
+		Components struct {
+			Responses map[string]any `yaml:"responses"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(SpecYAML(), &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := doc.Components.Responses["TooManyRequests"]; !ok {
+		t.Fatal("falta la respuesta reutilizable TooManyRequests")
+	}
+	for _, path := range []string{
+		"/api/v1/auth/login",
+		"/api/v1/telemetry/points",
+		"/api/v1/telemetry/bulk",
+		"/api/v1/ai/query",
+	} {
+		post, ok := doc.Paths[path]["post"].(map[string]any)
+		if !ok {
+			t.Errorf("%s: falta POST", path)
+			continue
+		}
+		responses, _ := post["responses"].(map[string]any)
+		if _, ok := responses["429"]; !ok {
+			t.Errorf("%s: falta la respuesta 429", path)
+		}
+	}
+}
+
 // La conversión YAML→JSON debe producir un documento JSON parseable equivalente.
 func TestSpecJSONEquivalente(t *testing.T) {
 	body, err := SpecJSON()

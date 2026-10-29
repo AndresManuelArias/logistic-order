@@ -1,10 +1,22 @@
-# CI mínima de F1: lint + pruebas + build del backend y validación del Compose.
+# CI de Tiendas-Track — F6.
+# Jobs: backend, web, móvil, Fastlane, contrato OpenAPI, IaC, Docker y escaneos.
+# Permisos mínimos: solo lectura del repositorio; no se publican artefactos.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION_FILE: backend/go.mod
 
 jobs:
   backend:
@@ -17,20 +29,159 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache-dependency-path: backend/go.sum
       - name: gofmt
         run: test -z "$(gofmt -l .)"
       - name: go vet
-        run: GOTOOLCHAIN=local go vet ./...
+        run: GOTOOLCHAIN=auto go vet ./...
       - name: go test (con race detector)
-        run: GOTOOLCHAIN=local go test -race ./...
+        run: GOTOOLCHAIN=auto go test -race ./...
       - name: build
-        run: GOTOOLCHAIN=local go build ./...
+        run: GOTOOLCHAIN=auto go build ./...
 
-  compose:
-    name: Valida docker-compose.yml
+  web:
+    name: Web (lint, tipos, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: lint
+        run: npm run lint
+      - name: tests
+        run: npm test
+      - name: contrato generado al día
+        run: npm run check:api
+      - name: build
+        run: npm run build
+
+  mobile:
+    name: Móvil (tipos, tests, bundle JS)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: tests
+        run: npm test
+      - name: contrato generado al día
+        run: npm run check:api
+      - name: bundle JS Android (sin SDK nativo)
+        run: npx expo export --platform android --output-dir dist
+
+  fastlane:
+    name: Fastlane (lane ci)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      CI: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+          working-directory: mobile
+      - run: npm ci
+      - name: fastlane ci
+        run: bundle exec fastlane ci
+
+  contract:
+    name: Contrato OpenAPI (Spectral)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose config -q
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: scripts/contract/check_openapi.sh
+
+  iac:
+    name: Terraform (fmt, validate, plan offline)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - name: plan sin credenciales AWS
+        run: |
+          terraform plan -refresh=false -input=false -no-color \
+            -var offline_plan=true \
+            -var db_password=offline-dummy \
+            -var jwt_secret=offline-dummy-secret-at-least-32-chars \
+            -var ai_api_key=offline-dummy
+
+  docker:
+    name: Docker (build backend/web + compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose config
+        run: docker compose config -q
+      - name: build backend
+        run: docker build -t tiendas-track-backend:ci ./backend
+      - name: build web
+        run: docker build -t tiendas-track-web:ci ./web
+
+  security:
+    name: Escaneos de dependencias (informativo)
+    runs-on: ubuntu-latest
+    # Informativo: no bloquea el pipeline por hallazgos preexistentes o sin fix.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: govulncheck
+        working-directory: backend
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: npm audit web
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+      - name: npm audit móvil
+        working-directory: mobile
+        run: npm audit --omit=dev --audit-level=high

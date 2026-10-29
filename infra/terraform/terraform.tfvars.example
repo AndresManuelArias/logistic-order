@@ -1,0 +1,21 @@
+# Copia a terraform.tfvars (ignorado por git) y ajusta.
+# NUNCA subas secretos reales al repositorio.
+
+aws_region  = "us-east-1"
+project     = "tiendas-track"
+environment = "dev"
+
+# Imagen publicada por el pipeline (ECR).
+backend_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/tiendas-track-backend:latest"
+desired_count = 2
+
+db_instance_class = "db.t4g.micro"
+db_name           = "tiendas"
+db_username       = "tiendas"
+# db_password    = "..."   # o llega por TF_VAR_db_password en CI
+
+# jwt_secret     = "..."   # openssl rand -hex 32
+# ai_api_key     = "..."   # opcional: sin clave el agente responde 503
+
+ws_allowed_origins = "https://app.tiendas-track.example"
+# certificate_arn   = "arn:aws:acm:us-east-1:123456789012:certificate/..."

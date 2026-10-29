@@ -5,6 +5,8 @@ package httperr
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 // Error es la representación del error de negocio para el cliente.
@@ -62,4 +64,16 @@ func Internal(w http.ResponseWriter) {
 // ServiceUnavailable 503: dependencia degradada o circuito abierto (RNF-05).
 func ServiceUnavailable(w http.ResponseWriter, code, message string) {
 	Write(w, http.StatusServiceUnavailable, code, message)
+}
+
+// TooManyRequests 429: límite de peticiones superado (§9.4). Incluye
+// Retry-After con los segundos mínimos que debe esperar el cliente.
+func TooManyRequests(w http.ResponseWriter, retryAfter time.Duration) {
+	secs := int64(retryAfter / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.FormatInt(secs, 10))
+	Write(w, http.StatusTooManyRequests, "RATE_LIMITED",
+		"demasiadas peticiones; reintenta más tarde")
 }

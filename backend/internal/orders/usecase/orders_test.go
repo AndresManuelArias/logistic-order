@@ -139,6 +139,22 @@ func TestCreateRolesNoPermitidos(t *testing.T) {
 	}
 }
 
+func TestCreateProvider(t *testing.T) {
+	f := newFakeOrders()
+	f.stores["store-a"] = true
+	uc := New(f, testLog)
+	provider := authz.Principal{Role: authz.RoleProvider, TokenType: authz.AccessToken, ProviderID: "provider-a"}
+
+	if _, err := uc.Create(context.Background(), provider, validInput("PROVIDER-REF", "store-a")); err != nil {
+		t.Fatalf("crear orden como proveedor: %v", err)
+	}
+
+	provider.ProviderID = ""
+	if _, err := uc.Create(context.Background(), provider, validInput("PROVIDER-REF-2", "store-a")); !errors.Is(err, domain.ErrForbiddenScope) {
+		t.Errorf("proveedor sin scope: err = %v, esperado ErrForbiddenScope", err)
+	}
+}
+
 // Coordenadas inválidas o external_ref vacío → error de validación.
 func TestCreateValidacion(t *testing.T) {
 	f := newFakeOrders()

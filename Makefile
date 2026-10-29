@@ -2,7 +2,7 @@
 COMPOSE ?= docker compose
 BACKEND_DIR := backend
 
-.PHONY: dev up db-up run-local down restart logs ps health seed test build vet fmt tidy psql e2e-f2 e2e-f3 test-web lint-web test-mobile lint-mobile gen-mobile-api clean help
+.PHONY: dev up db-up run-local down restart logs ps health seed test build vet fmt tidy psql e2e-f2 e2e-f3 test-web lint-web test-mobile lint-mobile gen-mobile-api seed-load load-test contract iac-validate iac-plan ci-local clean help
 
 help: ## Lista de comandos
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -44,19 +44,19 @@ swagger: ## Abre la documentación OpenAPI (imprime la URL)
 	   http://localhost:8080/api/v1/openapi.json
 
 test: ## Pruebas unitarias del backend
-	cd $(BACKEND_DIR) && GOTOOLCHAIN=local go test ./...
+	cd $(BACKEND_DIR) && GOTOOLCHAIN=auto go test ./...
 
 build: ## Compila el backend
-	cd $(BACKEND_DIR) && GOTOOLCHAIN=local go build ./...
+	cd $(BACKEND_DIR) && GOTOOLCHAIN=auto go build ./...
 
 vet: ## Análisis estático go vet
-	cd $(BACKEND_DIR) && GOTOOLCHAIN=local go vet ./...
+	cd $(BACKEND_DIR) && GOTOOLCHAIN=auto go vet ./...
 
 fmt: ## Formatea el código Go
-	cd $(BACKEND_DIR) && GOTOOLCHAIN=local gofmt -w .
+	cd $(BACKEND_DIR) && GOTOOLCHAIN=auto gofmt -w .
 
 tidy: ## Ordena dependencias
-	cd $(BACKEND_DIR) && GOTOOLCHAIN=local go mod tidy
+	cd $(BACKEND_DIR) && GOTOOLCHAIN=auto go mod tidy
 
 psql: ## Shell psql dentro del contenedor db
 	$(COMPOSE) exec db psql -U $${POSTGRES_USER:-tiendas} -d $${POSTGRES_DB:-tiendas}
@@ -81,6 +81,40 @@ lint-mobile: ## Typecheck de la app móvil (F4)
 
 gen-mobile-api: ## Regenera los tipos OpenAPI de la app móvil (ADR-10)
 	cd mobile && npm run gen:api
+
+seed-load: ## Siembra 100 vehículos LOAD-* para k6 (F6)
+	bash scripts/load/seed_load_vehicles.sh 100
+
+load-test: ## Prueba de carga k6 vía Docker (F6; backend en :8082)
+	docker run --rm --network host -i \
+	  -e BASE_URL=$${BASE_URL:-http://localhost:8082} \
+	  -e VUS=$${VUS:-100} -e DURATION=$${DURATION:-2m} \
+	  -e WS_VUS=$${WS_VUS:-20} \
+	  grafana/k6 run - < scripts/load/k6_f6.js
+
+contract: ## Lint del contrato OpenAPI con Spectral (F6)
+	bash scripts/contract/check_openapi.sh
+
+iac-validate: ## terraform fmt + validate de infra/terraform (F6)
+	cd infra/terraform && terraform fmt -check -recursive \
+	  && terraform init -backend=false -input=false >/dev/null \
+	  && terraform validate
+
+iac-plan: ## terraform plan offline sin credenciales AWS (F6)
+	cd infra/terraform && terraform plan -refresh=false -input=false -no-color \
+	  -var offline_plan=true \
+	  -var db_password=offline-dummy \
+	  -var jwt_secret=offline-dummy-secret-at-least-32-chars \
+	  -var ai_api_key=offline-dummy
+
+ci-local: ## Replica los jobs principales del CI en local (F6)
+	cd $(BACKEND_DIR) && test -z "$$(gofmt -l .)" && GOTOOLCHAIN=auto go vet ./... \
+	  && GOTOOLCHAIN=auto go test -race ./... && GOTOOLCHAIN=auto go build ./...
+	cd web && npm run typecheck && npm run lint && npm test && npm run check:api
+	cd mobile && npm run typecheck && npm test
+	$(MAKE) contract
+	$(MAKE) iac-validate
+	$(COMPOSE) config -q
 
 clean: ## Detiene el stack y borra volúmenes (¡borra datos locales!)
 	$(COMPOSE) down -v

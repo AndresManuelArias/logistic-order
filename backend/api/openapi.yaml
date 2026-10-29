@@ -218,6 +218,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/auth/refresh:
     post:
@@ -341,6 +343,25 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   /api/v1/stores:
+    get:
+      tags: [Stores]
+      operationId: listStores
+      summary: Lista las tiendas disponibles (rol PROVIDER)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Tiendas disponibles para crear órdenes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Store"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     post:
       tags: [Stores]
       operationId: createStore
@@ -684,6 +705,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -714,7 +737,9 @@ paths:
             type: string
             minLength: 8
             maxLength: 128
-          examples: ["device-8f3a-batch-0001"]
+          examples:
+            lote:
+              value: "device-8f3a-batch-0001"
       requestBody:
         required: true
         content:
@@ -736,6 +761,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1058,6 +1085,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "502":
           $ref: "#/components/responses/BadGateway"
         "503":
@@ -1556,6 +1585,21 @@ components:
         Dependencia degradada. En telemetría indica circuit breaker abierto
         (`503 CIRCUIT_OPEN`); incluye `Retry-After`. En el agente IA también
         cubre `AI_NOT_CONFIGURED` cuando falta la credencial del proveedor.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: |
+        Límite de peticiones superado (`429 RATE_LIMITED`). Se aplica por IP en
+        el login y por usuario autenticado (fallback IP) en telemetría y agente
+        IA. La cabecera `Retry-After` indica los segundos mínimos de espera.
+      headers:
+        Retry-After:
+          description: Segundos que el cliente debe esperar antes de reintentar.
+          schema:
+            type: integer
+            minimum: 1
       content:
         application/json:
           schema:

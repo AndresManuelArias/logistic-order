@@ -1,0 +1,36 @@
+default_platform(:android)
+
+platform :android do
+  desc "Typecheck y pruebas unitarias de la app móvil"
+  lane :test do
+    sh("npm", "run", "typecheck")
+    sh("npm", "run", "test")
+  end
+
+  desc "Bundle JS de producción con Expo (no requiere Android SDK)"
+  lane :build do
+    test
+    sh("npx", "expo", "export", "--platform", "android", "--output-dir", "dist")
+  end
+
+  desc "Lane de CI: validación + bundle JS"
+  lane :ci do
+    build
+  end
+
+  desc "Build nativo iOS (solo macOS con Xcode)"
+  lane :ios do
+    unless RUBY_PLATFORM.include?("darwin")
+      UI.user_error!(
+        "La lane iOS requiere macOS con Xcode y credenciales de firma. " \
+        "En Linux solo está soportada la lane `ci` (bundle JS)."
+      )
+    end
+    sh("npx", "expo", "prebuild", "--platform", "ios")
+    build_app(
+      workspace: "ios/TiendasTrack.xcworkspace",
+      scheme: "TiendasTrack",
+      export_method: "app-store"
+    )
+  end
+end

@@ -1,0 +1,5 @@
+source "https://rubygems.org"
+
+# Fastlane para las lanes de validación/bundle de la app móvil (F6).
+# La firma y el build nativo iOS requieren macOS; ver mobile/fastlane/README.md.
+gem "fastlane", "~> 2.222"

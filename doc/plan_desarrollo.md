@@ -378,6 +378,48 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   5. **Validación de contrato:** verificar con **Spectral** (lint del spec) o un test de contrato propio que `backend/api/openapi.yaml` coincide con las respuestas reales del servidor (spec ↔ implementación sincronizados).
 - **Criterio de aceptación:** pipeline verde; k6 cumple umbrales; `terraform plan` sin errores.
 
+#### Estado F6 (2026-10-29)
+
+- **k6 (RNF-06/RNF-04):** `scripts/load/k6_f6.js` con escenarios `ingest` y `ws`
+  configurables por entorno, 5% de duplicados exactos, 1% de errores inyectados
+  y umbrales p95 < 500 ms. Semilla idempotente
+  `scripts/load/seed_load_vehicles.sh` (120 vehículos `LOAD-*` en la validación)
+  y guía en `scripts/load/README.md`. Ejecución real con 100 VUs + 20 WS durante
+  20 s: **p95 ingesta 11,8 ms**, **p95 WS 11 ms**, **0 respuestas 5xx**, 2.546
+  checks correctos, 105 duplicados confirmados y 23 `422` esperados. Sin rate
+  limiting de telemetría en el entorno de carga (documentado).
+- **Rate limiting (§9.4):** paquete `backend/internal/shared/ratelimit` +
+  middleware en el router, límites `RATE_LIMIT_*` (login por IP; telemetría/IA
+  por usuario) y `429` con `Retry-After` documentado en OpenAPI. Pruebas
+  unitarias y de integración del router en verde.
+- **Terraform (RNF-09):** `infra/terraform` con VPC, ALB, ECS Fargate, RDS
+  PostgreSQL 16, Secrets Manager, IAM mínimo, CloudWatch y NAT.
+  `terraform fmt -check`, `validate` y `plan` offline (`offline_plan=true`)
+  correctos: **36 recursos**. Limitación documentada: RDS no soporta
+  TimescaleDB; ruta de producción en `infra/README.md`.
+- **CI/CD:** `.github/workflows/ci.yml` con jobs `backend`, `web`, `mobile`,
+  `fastlane`, `contract`, `iac`, `docker` y `security` (informativo). Permisos
+  `contents: read` y cachés de Go/npm. `mobile/fastlane/Fastfile` + `Gemfile`
+  con lanes `test`, `build`, `ci` (bundle JS) e `ios` (solo macOS, falla
+  explícitamente en Linux). Targets `make contract`, `iac-validate`, `iac-plan`,
+  `load-test`, `seed-load` y `ci-local`.
+- **Contrato (RNF-08):** `scripts/contract/check_openapi.sh` ejecuta las pruebas
+  Go del spec y Spectral con `.spectral.yaml`; corregidos dos errores previos
+  (`examples` del header y `101` de `/ws`). Resultado: **sin errores**.
+- **Seguridad:** `doc/seguridad/auditoria_f6.md` con 10 hallazgos priorizados y
+  checklist §9.4. Se actualizaron dependencias vulnerables (`pgx` 5.9.2, `jwt`
+  5.2.2, `x/text` 0.41.0; Go 1.25) y `govulncheck` pasa a **0 vulnerabilidades
+  en código llamado**. `npm audit` web: 0; móvil: 15 residuales de `postcss`
+  transitivo de Expo (fix incompatible). README raíz con la sección
+  **Auditoría del uso de la IA** (dos casos verificables).
+- **Validación local:** `gofmt`, `go vet ./...`, `go test ./...`,
+  `go test -race` de paquetes tocados, 58 pruebas web, 99 pruebas móvil,
+  `docker compose config`, `docker build` del backend, Spectral y Terraform.
+- **Límites:** no hay credenciales AWS (no se ejecutó `apply` ni un plan real),
+  ni macOS/Xcode (no se generó binario iOS), ni `AI_API_KEY` real. El pipeline
+  remoto no se ejecutó porque el repositorio no tiene remoto configurado; los
+  jobs se reprodujeron localmente salvo Fastlane (sin Ruby en el host).
+
 ---
 
 ## 8. Matriz de Trazabilidad (resumen)

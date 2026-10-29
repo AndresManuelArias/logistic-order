@@ -30,6 +30,7 @@ func NewHandler(uc *usecase.StoresUseCase, log *slog.Logger) *Handler {
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, auth func(http.Handler) http.Handler, roles func(...string) func(http.Handler) http.Handler) {
 	mux.Handle("POST /api/v1/stores", auth(roles("STORE")(http.HandlerFunc(h.Create))))
 	mux.Handle("GET /api/v1/stores/me", auth(roles("STORE")(http.HandlerFunc(h.Me))))
+	mux.Handle("GET /api/v1/stores", auth(roles("PROVIDER")(http.HandlerFunc(h.List))))
 }
 
 type storeRequest struct {
@@ -92,6 +93,22 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(toStoreResponse(s))
+}
+
+// List maneja GET /api/v1/stores para proveedores.
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	p, _ := middleware.PrincipalFrom(r.Context())
+	stores, err := h.uc.List(r.Context(), p)
+	if err != nil {
+		h.mapError(w, r.Header.Get("X-Correlation-ID"), "List", err)
+		return
+	}
+	response := make([]storeResponse, 0, len(stores))
+	for i := range stores {
+		response = append(response, toStoreResponse(&stores[i]))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // Me maneja GET /api/v1/stores/me.

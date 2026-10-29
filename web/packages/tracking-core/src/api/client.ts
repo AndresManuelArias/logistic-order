@@ -3,6 +3,8 @@
 import { ApiError, toApiError } from '../domain/errors'
 import type {
   BulkSyncResponse,
+  Driver,
+  DriverPage,
   GuestTokenResponse,
   Order,
   OrderPage,
@@ -66,10 +68,12 @@ export interface ApiClient {
   getOrder: (id: string) => Promise<Order>
   changeOrderStatus: (id: string, status: OrderStatus) => Promise<Order>
   assignOrder: (id: string, input: { vehicle_id: string; driver_id: string }) => Promise<Order>
+  listStores: () => Promise<Store[]>
   getMyStore: () => Promise<Store>
   createStore: (input: CreateStoreInput) => Promise<Store>
   issueGuestToken: (orderId: string) => Promise<GuestTokenResponse>
   listVehicles: (params?: { limit?: number; offset?: number }) => Promise<VehiclePage>
+  listDrivers: (vehicleId: string) => Promise<DriverPage>
   latest: (vehicleId: string) => Promise<Schemas['LatestPositionResponse']>
   track: (vehicleId: string, range: TrackRange) => Promise<TrackResponse>
   ingestPoint: (point: PointInput) => Promise<Schemas['IngestResponse']>
@@ -197,6 +201,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         body: input,
       }),
 
+    listStores: () => request<Store[]>('/api/v1/stores'),
+
     getMyStore: () => request<Store>('/api/v1/stores/me'),
 
     createStore: (input) =>
@@ -210,6 +216,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 
     listVehicles: (params = {}) =>
       request<VehiclePage>(withQuery('/api/v1/vehicles', { limit: params.limit, offset: params.offset })),
+
+    listDrivers: (vehicleId) =>
+      request<DriverPage>(withQuery('/api/v1/drivers', { vehicle_id: vehicleId })),
 
     latest: (vehicleId) =>
       request<Schemas['LatestPositionResponse']>(

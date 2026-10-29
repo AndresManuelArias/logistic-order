@@ -104,8 +104,8 @@ func (r *OrderRepository) List(ctx context.Context, f domain.ListFilter) ([]doma
 		add("o.assigned_driver_id = $%d::uuid", f.DriverID)
 	}
 	if f.ProviderID != "" {
-		add(`EXISTS (SELECT 1 FROM app.vehicles v
-		             WHERE v.id = o.assigned_vehicle_id AND v.provider_id = $%d::uuid)`, f.ProviderID)
+		add(`(o.assigned_vehicle_id IS NULL OR EXISTS (SELECT 1 FROM app.vehicles v
+		             WHERE v.id = o.assigned_vehicle_id AND v.provider_id = $%d::uuid))`, f.ProviderID)
 	}
 	if f.Status != nil {
 		add("o.status = $%d::app.order_status", string(*f.Status))

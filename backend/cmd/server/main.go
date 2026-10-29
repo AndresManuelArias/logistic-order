@@ -22,6 +22,9 @@ import (
 	authinfrastructure "tiendas-track/backend/internal/auth/infrastructure"
 	authpostgres "tiendas-track/backend/internal/auth/infrastructure/postgres"
 	authusecase "tiendas-track/backend/internal/auth/usecase"
+	driversdelivery "tiendas-track/backend/internal/drivers/delivery"
+	driverspostgres "tiendas-track/backend/internal/drivers/infrastructure/postgres"
+	driversusecase "tiendas-track/backend/internal/drivers/usecase"
 	ordersdelivery "tiendas-track/backend/internal/orders/delivery"
 	orderspostgres "tiendas-track/backend/internal/orders/infrastructure/postgres"
 	ordersusecase "tiendas-track/backend/internal/orders/usecase"
@@ -29,6 +32,7 @@ import (
 	"tiendas-track/backend/internal/shared/database"
 	"tiendas-track/backend/internal/shared/eventbus"
 	"tiendas-track/backend/internal/shared/httpserver"
+	"tiendas-track/backend/internal/shared/ratelimit"
 	"tiendas-track/backend/internal/shared/resilience"
 	"tiendas-track/backend/internal/shared/token"
 	"tiendas-track/backend/internal/shared/websocket"
@@ -100,10 +104,12 @@ func run() error {
 	pointRepo := telemetrypostgres.NewPointRepository(pool)
 	scopeRepo := telemetrypostgres.NewScopeRepository(pool)
 	fleetRepo := telemetrypostgres.NewFleetRepository(pool)
+	driverRepo := driverspostgres.NewDriverRepository(pool)
 
 	// Casos de uso.
 	ordersUC := ordersusecase.New(ordersRepo, log)
 	storesUC := storesusecase.New(storeRepo, log)
+	driversUC := driversusecase.New(driverRepo, log)
 	// El módulo auth no conoce al de orders: se le inyecta una función que
 	// decide si el llamante puede emitir un token de invitado sobre la orden.
 	authUC := authusecase.New(userRepo, userRepo, refreshRepo, guestRepo,
@@ -161,7 +167,9 @@ func run() error {
 			Stores:    storesdelivery.NewHandler(storesUC, log),
 			Telemetry: telemetrydelivery.NewHandler(telemetryUC, fleetUC, hub, tokenSvc, log),
 			AI:        aidelivery.NewHandler(aiUC, log),
+			Drivers:   driversdelivery.NewHandler(driversUC, log),
 		},
+		RateLimits: rateLimits(cfg, log),
 	})
 
 	srv := &http.Server{
@@ -196,4 +204,25 @@ func run() error {
 	}
 	log.Info("servicio detenido limpiamente")
 	return nil
+}
+
+// rateLimits construye los limitadores de F6 si RATE_LIMIT_ENABLED=true.
+// Devuelve nil cuando está desactivado para no tocar el camino de la petición.
+func rateLimits(cfg *config.Config, log *slog.Logger) *httpserver.RateLimits {
+	if !cfg.RateLimitEnabled {
+		log.Warn("rate limiting deshabilitado (RATE_LIMIT_ENABLED=false)")
+		return nil
+	}
+	log.Info("rate limiting activo",
+		"login_per_min", cfg.RateLimitLoginPerMin,
+		"telemetry_per_min", cfg.RateLimitTelemetryPerMin,
+		"ai_per_min", cfg.RateLimitAIPerMin,
+		"trust_proxy", cfg.RateLimitTrustProxy,
+	)
+	return &httpserver.RateLimits{
+		Login:      ratelimit.New(cfg.RateLimitLoginPerMin),
+		Telemetry:  ratelimit.New(cfg.RateLimitTelemetryPerMin),
+		AI:         ratelimit.New(cfg.RateLimitAIPerMin),
+		TrustProxy: cfg.RateLimitTrustProxy,
+	}
 }

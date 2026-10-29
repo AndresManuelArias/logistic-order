@@ -1,0 +1,13 @@
+extends:
+  - spectral:oas
+
+rules:
+  # Reglas de estilo que no aportan al contrato de este proyecto.
+  info-contact: off
+  info-description: off
+  info-license: off
+  tag-description: off
+  operation-description: off
+  operation-tag-defined: off
+  # /ws responde 101 (Switching Protocols), que la regla no considera 2xx/3xx.
+  operation-success-response: off

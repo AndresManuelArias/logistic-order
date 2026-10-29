@@ -45,6 +45,13 @@ type Config struct {
 	AIModel    string
 	AITimeout  time.Duration
 	AIMaxSteps int
+
+	// F6: rate limiting (§9.4). Límites por minuto y por clave (IP o usuario).
+	RateLimitEnabled         bool
+	RateLimitLoginPerMin     int
+	RateLimitTelemetryPerMin int
+	RateLimitAIPerMin        int
+	RateLimitTrustProxy      bool
 }
 
 // Load lee la configuración del entorno. Falla si falta DATABASE_URL,
@@ -109,6 +116,20 @@ func Load() (*Config, error) {
 	}
 	cfg.AIMaxSteps = int(steps)
 
+	// Rate limiting (F6). Valores conservadores para desarrollo; ajustables
+	// por entorno. Un valor <= 0 desactiva el limitador de esa superficie.
+	cfg.RateLimitEnabled = getBool("RATE_LIMIT_ENABLED", true)
+	cfg.RateLimitTrustProxy = getBool("RATE_LIMIT_TRUST_PROXY", false)
+	if cfg.RateLimitLoginPerMin, err = getInt("RATE_LIMIT_LOGIN_PER_MIN", 10); err != nil {
+		return nil, err
+	}
+	if cfg.RateLimitTelemetryPerMin, err = getInt("RATE_LIMIT_TELEMETRY_PER_MIN", 120); err != nil {
+		return nil, err
+	}
+	if cfg.RateLimitAIPerMin, err = getInt("RATE_LIMIT_AI_PER_MIN", 10); err != nil {
+		return nil, err
+	}
+
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL es obligatoria")
 	}
@@ -171,4 +192,19 @@ func getInt32(key string, def int32) (int32, error) {
 		return 0, fmt.Errorf("config: %s inválida (%q)", key, v)
 	}
 	return int32(n), nil
+}
+
+func getInt(key string, def int) (int, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s inválida (%q)", key, v)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("config: %s no puede ser negativa (%d)", key, n)
+	}
+	return n, nil
 }
