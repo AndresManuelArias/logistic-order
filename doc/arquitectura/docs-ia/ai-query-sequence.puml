@@ -1,0 +1,89 @@
+@startuml ai-query-sequence
+!theme plain
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+skinparam participantPadding 16
+skinparam BoxPadding 12
+
+title Flujo de POST /api/v1/ai/query
+actor Usuario as U
+participant "Portal React\nAiAssistant" as UI
+participant "API Next.js\n/ api/backend" as Proxy
+participant "HTTP Handler\naiagent/delivery" as Handler
+participant "Middleware Auth" as Auth
+participant "Caso de uso\nAgent.Query" as Agent
+participant "Circuit Breaker" as Breaker
+participant "Adaptador Gemini" as Gemini
+participant "Google Gemini API\ngenerateContent" as LLM
+participant "Registro de herramientas" as Tools
+participant "Repositorio analítico\nPostgreSQL" as Repo
+participant "Repositorio de auditoría\nPostgreSQL" as Audit
+
+U -> UI: Escribe pregunta y pulsa Preguntar
+UI -> Proxy: POST /api/backend/api/v1/ai/query\n{ question }
+Proxy -> Handler: Reescribe a POST /api/v1/ai/query\n+ token JWT
+Handler -> Auth: Validar token y rol
+Auth --> Handler: Principal (provider/store/driver)
+Handler -> Handler: Validar JSON, longitud y pregunta
+
+alt Error de autenticación o validación
+  Handler --> Proxy: 401/403/422 con código de error
+  Proxy --> UI: Propaga respuesta JSON
+  UI --> U: Muestra mensaje accionable
+else Consulta válida
+  Handler -> Agent: Query(context, principal, question)
+  Agent -> Agent: Validar pregunta y resolver Scope por rol
+  Agent -> Agent: Verificar IA habilitada y modelo configurado
+  Agent -> Agent: Crear contexto (timeout, prompt de sistema, pregunta)
+
+  loop Hasta MaxSteps sin respuesta final
+    Agent -> Breaker: Ejecutar Complete()
+    Breaker -> Gemini: Complete(ChatRequest + catálogo de herramientas)
+    Gemini -> Gemini: Seleccionar modelo\nsanitizar schemas JSON\nconstruir generateContent
+    Gemini -> LLM: POST generateContent\ntext + tools + temperatura
+    LLM --> Gemini: Texto o toolCall + thoughtSignature
+    Gemini --> Breaker: ChatResponse normalizado
+    Breaker --> Agent: ChatResponse
+
+    alt Respuesta final sin tool call
+      Agent -> Agent: Extraer y limpiar respuesta textual
+      Agent -> Audit: Guardar OK, pregunta, respuesta, modelo y herramientas
+      Audit -> Audit: INSERT app.ai_query_log
+      Audit --> Agent: audit_id
+      Agent --> Handler: Answer + herramientas + audit_id
+      Handler -> Proxy: 200 JSON
+      Proxy -> UI: AiAnswer
+      UI -> U: Muestra respuesta, modelo y herramientas usadas
+    else Gemini solicita herramienta
+      Agent -> Agent: Agregar mensaje model con tool_calls
+      loop Tool calls solicitadas (máximo permitido)
+        Agent -> Tools: invoke(tool, argumentos, scope)
+        Tools -> Tools: Validar nombre y argumentos
+        Tools -> Repo: Ejecutar consulta analytics del rol
+        Repo --> Tools: Datos operativos filtrados por provider/store/driver
+        Tools --> Agent: Resultado JSON + invocación/auditoría
+        Agent -> Agent: Agregar resultado al historial como mensaje tool
+      end
+    end
+  end
+
+  alt Máximo de pasos alcanzado
+    Agent -> Audit: Guardar ERROR sin respuesta válida
+    Agent --> Handler: ErrNoAnswer
+    Handler --> Proxy: 502 AI_INVALID_RESPONSE
+    Proxy --> UI: Error
+    UI --> U: No se pudo completar la consulta
+  end
+end
+
+alt Timeout o error del proveedor
+  Gemini --> Breaker: ErrTimeout/ErrProvider
+  Breaker --> Agent: Error clasificado
+  Agent -> Audit: Guardar ERROR y código
+  Agent --> Handler: ErrTimeout/ErrProvider
+  Handler --> Proxy: 504/502 con código AI_TIMEOUT/AI_PROVIDER_ERROR
+  Proxy --> UI: Error
+  UI --> U: Muestra mensaje de reintento o proveedor
+end
+
+@enduml
