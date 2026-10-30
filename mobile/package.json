@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "App móvil offline-first del conductor de Tiendas-Track (F4)",
+  "engines": {
+    "node": "^20.19.4 || ^22.0.0 || >=24.0.0"
+  },
   "main": "index.ts",
   "scripts": {
     "start": "expo start --dev-client",
@@ -41,6 +44,6 @@
     "babel-preset-expo": "~54.0.10",
     "openapi-typescript": "^7.13.0",
     "typescript": "~5.9.2",
-    "vitest": "^5.0.5"
+    "vitest": "^4.1.12"
   }
 }

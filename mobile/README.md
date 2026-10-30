@@ -13,9 +13,13 @@ GPS, guarda cada muestra en el dispositivo, encola los cambios de estado de las
 
 ## 1. Arranque rápido
 
+> **Requisitos:** Node.js **20.19.4+** (recomendado 22 LTS; hay `.nvmrc`, ejecuta
+> `nvm use`) y npm 10+. `npm ci` instala exactamente las versiones del lockfile.
+
 ```bash
 cd mobile
-npm install
+nvm use                     # Node 22 (si usas nvm)
+npm ci                      # instalación reproducible desde package-lock.json
 cp .env.example .env        # ajusta EXPO_PUBLIC_API_URL
 
 npm run typecheck           # tsc --noEmit
