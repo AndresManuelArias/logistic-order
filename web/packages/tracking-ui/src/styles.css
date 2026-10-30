@@ -312,6 +312,7 @@
 .tt-map-marker {
   position: relative;
   pointer-events: auto;
+  transition: transform 350ms linear;
 }
 
 .tt-map-marker svg {

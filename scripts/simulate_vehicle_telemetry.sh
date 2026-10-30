@@ -8,7 +8,8 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-proveedor@tiendas.dev}"
 PASSWORD="${PASSWORD:-Proveedor123}"
 COUNT="${COUNT:-12}"
-DELAY_SECONDS=2   # fijo: 2 segundos entre cada punto enviado
+DELAY_SECONDS="${INTERVAL_SECONDS:-2}"   # intervalo configurable entre puntos enviados
+PLATE="${PLATE:-}"                       # opcional: simular una sola placa
 
 json_value() {
   python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"
@@ -49,7 +50,7 @@ if [[ "$vehicles_status" != "200" ]]; then
 fi
 
 # Extrae pares "plate:id" para todos los vehículos de la respuesta.
-mapfile -t vehicle_pairs < <(python3 - "$vehicles_file" <<'PYEOF'
+mapfile -t all_vehicle_pairs < <(python3 - "$vehicles_file" <<'PYEOF'
 import json, sys
 
 with open(sys.argv[1]) as f:
@@ -65,8 +66,23 @@ for v in items:
 PYEOF
 )
 
+vehicle_pairs=()
+if [[ -n "$PLATE" ]]; then
+  for pair in "${all_vehicle_pairs[@]}"; do
+    if [[ "${pair%%:*}" == "$PLATE" ]]; then
+      vehicle_pairs+=("$pair")
+    fi
+  done
+else
+  vehicle_pairs=("${all_vehicle_pairs[@]}")
+fi
+
 if [[ ${#vehicle_pairs[@]} -eq 0 ]]; then
-  echo "La flota del proveedor no tiene vehículos." >&2
+  if [[ -n "$PLATE" ]]; then
+    echo "No existe el vehículo con placa '$PLATE' en la flota del proveedor." >&2
+  else
+    echo "La flota del proveedor no tiene vehículos." >&2
+  fi
   exit 1
 fi
 
@@ -103,7 +119,7 @@ simulate_vehicle() {
     local lat lon time seq heading status
     lat=$(python3 -c "print(f'{$start_lat + $i * 0.000045:.6f}')")
     lon=$(python3 -c "print(f'{$start_lon + $i * 0.000025:.6f}')")
-    time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    time=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
     # device_seq único por vehículo: base en el índice de flota para evitar
     # colisiones si dos vehículos emiten el mismo segundo.
     seq=$(( 3000000 + idx * 100000 + i ))

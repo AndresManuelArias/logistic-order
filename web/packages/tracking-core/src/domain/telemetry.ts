@@ -54,7 +54,10 @@ export function pointKey(p: Pick<TelemetryPoint, 'vehicle_id' | 'time' | 'device
 
 export function isNewerPoint(incoming: TelemetryPoint, current: TelemetryPoint | undefined): boolean {
   if (!current) return true
-  return Date.parse(incoming.time) > Date.parse(current.time)
+  const incomingTime = Date.parse(incoming.time)
+  const currentTime = Date.parse(current.time)
+  if (incomingTime !== currentTime) return incomingTime > currentTime
+  return incoming.device_seq > current.device_seq
 }
 
 export function mergeLatestPoint(

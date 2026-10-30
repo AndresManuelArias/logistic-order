@@ -65,6 +65,7 @@ export function TrackingMap({
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map())
+  const fittedMarkerIdsRef = useRef<string | null>(null)
   const hasData = markers.length > 0 || trails.some((trail) => trail.points.length > 0)
 
   // Compute bounds for the map view
@@ -93,6 +94,10 @@ export function TrackingMap({
   // Update map view when bounds change
   useEffect(() => {
     if (!mapRef.current) return
+
+    const markerIds = markers.map((marker) => marker.id).sort().join('|')
+    if (fittedMarkerIdsRef.current === markerIds) return
+    fittedMarkerIdsRef.current = markerIds
 
     const mapBounds = bounds()
     const southWest = new maplibregl.LngLat(mapBounds.minLon, mapBounds.minLat)
