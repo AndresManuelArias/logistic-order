@@ -37,6 +37,7 @@ export function createTrackingApi(http: HttpClient): TrackingApi {
         method: 'POST',
         body: { email, password },
         retryOnUnauthorized: false,
+        auth: false,
       }),
 
     refresh: (refreshToken) =>
@@ -44,6 +45,7 @@ export function createTrackingApi(http: HttpClient): TrackingApi {
         method: 'POST',
         body: { refresh_token: refreshToken },
         retryOnUnauthorized: false,
+        auth: false,
       }),
 
     logout: (refreshToken) =>
@@ -51,6 +53,7 @@ export function createTrackingApi(http: HttpClient): TrackingApi {
         method: 'POST',
         body: { refresh_token: refreshToken },
         retryOnUnauthorized: false,
+        auth: false,
       }),
 
     me: (accessToken) =>

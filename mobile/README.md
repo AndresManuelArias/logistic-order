@@ -63,6 +63,16 @@ cd mobile && npm run android
   sistema; reserva ese espacio antes de instalarlo.
 - El emulador Android mapea `10.0.2.2` al loopback del host: es lo que permite
   que `EXPO_PUBLIC_API_URL=http://10.0.2.2:8080` llegue al backend local.
+- Si `avdmanager create avd` termina imprimiendo `null` y no crea nada (pasa con
+  imágenes descargadas a mano para API 36, porque el zip no trae `package.xml`),
+  el emulador **sí** acepta el AVD creado manualmente:
+  - Registrar el paquete en `system-images/android-36/google_apis/x86_64/package.xml`
+    (`sysImgDetailsType`, api-level 36, tag `google_apis`, abi `x86_64`).
+  - Crear `$ANDROID_AVD_HOME/tiendas36.ini` (`path` + `target=android-36`) y
+    `tiendas36.avd/config.ini` (`abi.type=x86_64`, `image.sysdir.1=system-images/android-36/google_apis/x86_64/`,
+    `hw.device.name=pixel_7`, RAM/CPU/densidad).
+  - Comprobar con `emulator -list-avds`; `avdmanager list avd` puede seguir
+    fallando sin impedir el arranque.
 
 ### URL del backend
 
@@ -242,6 +252,12 @@ la misma promesa y no crean dos lotes con claves distintas.
   segundo plano tras el primer desbloqueo.
 - Refresh **single-flight**: varias peticiones concurrentes comparten una sola
   rotación; evita invalidar el refresh token por doble uso.
+- La petición de refresh se envía con `auth: false`: no resuelve el access token
+  ni reintenta tras un 401. Si lo hiciera, `getAccessToken` → `ensureAccessToken`
+  volvería a pedir el refresh en curso y formaría una cadena de promesas
+  autorreferente (`Maximum call stack size exceeded (native stack depth)`) que
+  bloquea toda sincronización hasta reiniciar la app. Cubierto por
+  `src/infrastructure/api/http.test.ts`.
 - Un fallo de red al renovar **no cierra la sesión**: la app sigue operando
   offline y reintenta al reconectar.
 - Un refresh revocado (`401/403`) limpia la sesión y pide login; los datos
@@ -360,6 +376,7 @@ permisos reales, cámara, ciclo de vida en segundo plano y consumo de batería.
 | «Sin conexión» con red | `EXPO_PUBLIC_API_URL` incorrecta o firewall | Probar `curl http://<host>:8080/healthz` desde el dispositivo/emulador |
 | La cola no avanza y error 403 | Conductor sin vehículo asignado | Asignar vehículo/orden en el backend; los puntos se conservan |
 | «La sesión caducó» | Refresh revocado o expirado | Volver a iniciar sesión; la cola local se mantiene |
+| «Maximum call stack size exceeded (native stack depth)» al caducar el token | La petición de refresh resolvía el access token y se llamaba a sí misma | Ya corregido (`auth: false` en `/auth/*`); si reaparece, revisar `HttpClient.request` y añadir el caso a `http.test.ts` |
 | No aparece el permiso «Siempre» | iOS exige conceder primero «Al usar la app» y luego volver a solicitar | Ajustes → Ubicación → Siempre |
 | El GPS no avanza en Expo Go | Limitación de Expo Go | Usar `expo prebuild` + dev client |
 | GPS activo pero 0 puntos | La petición es de red y no de GPS | `adb shell dumpsys activity service com.google.android.gms/com.google.android.location.internal.GoogleLocationManagerService \| grep -E "tiendas\|HIGH_ACCURACY\|GpsBatch"`; debe aparecer `HIGH_ACCURACY` y `GpsBatch[requested=true]` |

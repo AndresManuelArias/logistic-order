@@ -26,6 +26,16 @@ export interface RequestOptions {
    * se consulta ni se refresca la sesión persistida.
    */
   accessToken?: string
+  /**
+   * `false` para peticiones que no usan sesión (login, refresh, logout): no se
+   * resuelve el access token ni se reintenta tras un 401.
+   *
+   * Es obligatorio en `/auth/refresh`: resolver el token ahí llama a
+   * `ensureAccessToken`, que al estar expirado vuelve a pedir el refresh en
+   * curso y crea una cadena de promesas autorreferente («Maximum call stack
+   * size exceeded (native stack depth)») que inutiliza la sesión.
+   */
+  auth?: boolean
 }
 
 interface ErrorEnvelope {
@@ -93,9 +103,12 @@ export class HttpClient {
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const hasOverride = typeof options.accessToken === 'string'
+    const usesAuth = options.auth !== false
     const accessToken = hasOverride
       ? options.accessToken
-      : await this.deps.getAccessToken()
+      : usesAuth
+        ? await this.deps.getAccessToken()
+        : null
     const headers: Record<string, string> = {
       Accept: 'application/json',
       ...options.headers,
@@ -132,7 +145,12 @@ export class HttpClient {
       clearTimeout(timer)
     }
 
-    if (response.status === 401 && options.retryOnUnauthorized !== false && !hasOverride) {
+    if (
+      response.status === 401 &&
+      options.retryOnUnauthorized !== false &&
+      usesAuth &&
+      !hasOverride
+    ) {
       try {
         const refreshed = await this.deps.refreshAccessToken()
         if (refreshed) {
