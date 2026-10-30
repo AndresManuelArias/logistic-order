@@ -6,6 +6,7 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   DEFAULT_BOUNDS,
   computeBounds,
+  computeCenter,
   padBounds,
   type GeoPoint,
 } from '../lib/geometry'
@@ -68,12 +69,18 @@ export function TrackingMap({
   const fittedMarkerIdsRef = useRef<string | null>(null)
   const hasData = markers.length > 0 || trails.some((trail) => trail.points.length > 0)
 
-  // Compute bounds for the map view
-  const bounds = useCallback(() => {
+  const currentPoints = useCallback(() => {
     const points: GeoPoint[] = [...markers]
     for (const trail of trails) points.push(...trail.points)
-    return padBounds(computeBounds(points) ?? DEFAULT_BOUNDS)
+    return points
   }, [markers, trails])
+
+  // Compute bounds for the map view
+  const bounds = useCallback(() => {
+    return padBounds(computeBounds(currentPoints()) ?? DEFAULT_BOUNDS)
+  }, [currentPoints])
+
+  const center = useCallback(() => computeCenter(markers), [markers])
 
   // Initialize map on first render
   useEffect(() => {
@@ -107,7 +114,18 @@ export function TrackingMap({
       padding: 50,
       animate: true,
     })
-  }, [bounds])
+  }, [bounds, markers])
+
+  // Mantener el centro geográfico centrado en el promedio de los vehículos actuales.
+  useEffect(() => {
+    if (!mapRef.current) return
+    const fleetCenter = center()
+    if (!fleetCenter) return
+    mapRef.current.easeTo({
+      center: [fleetCenter.lon, fleetCenter.lat],
+      duration: 350,
+    })
+  }, [center])
 
   // Update markers
   useEffect(() => {

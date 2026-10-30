@@ -27,6 +27,22 @@ export const DEFAULT_BOUNDS: GeoBounds = {
   maxLon: -73.95,
 }
 
+export function computeCenter(points: readonly GeoPoint[]): GeoPoint | null {
+  let latSum = 0
+  let lonSum = 0
+  let count = 0
+
+  for (const point of points) {
+    if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) continue
+    latSum += point.lat
+    lonSum += point.lon
+    count += 1
+  }
+
+  if (count === 0) return null
+  return { lat: latSum / count, lon: lonSum / count }
+}
+
 export function computeBounds(points: readonly GeoPoint[]): GeoBounds | null {
   if (points.length === 0) return null
   let minLat = Number.POSITIVE_INFINITY

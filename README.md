@@ -432,9 +432,14 @@ La app vive en [`mobile/`](mobile/README.md) y es **offline-first**:
 - Tokens en SecureStore y refresh single-flight; datos locales aislados por
   conductor (`owner_id`).
 
+> **Los comandos `npm`/`npx` de la app se ejecutan dentro de `mobile/`.** La raíz
+> del repositorio no es un paquete npm: `npm ci` ahí falla con `ENOENT
+> package.json`. Desde la raíz usa `make install-mobile`, `make test-mobile` o
+> `make lint-mobile`.
+
 ```bash
 cd mobile
-npm install
+npm ci
 cp .env.example .env    # EXPO_PUBLIC_API_URL=http://10.0.2.2:8080 (Android)
 npm test                # 99 pruebas de dominio, cola, sync, sesión y POD
 npm run typecheck

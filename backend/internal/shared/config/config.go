@@ -39,12 +39,13 @@ type Config struct {
 
 	// F5: agente operativo de IA (RF-10, RNF-05). La API key es un secreto:
 	// si falta, el agente queda deshabilitado y responde 503 controlado.
-	AIEnabled  bool
-	AIBaseURL  string
-	AIAPIKey   string
-	AIModel    string
-	AITimeout  time.Duration
-	AIMaxSteps int
+	AIEnabled   bool
+	AIProvider  string // "openai" (por defecto) | "gemini"
+	AIBaseURL   string
+	AIAPIKey    string
+	AIModel     string
+	AITimeout   time.Duration
+	AIMaxSteps  int
 
 	// F6: rate limiting (§9.4). Límites por minuto y por clave (IP o usuario).
 	RateLimitEnabled         bool
@@ -102,6 +103,7 @@ func Load() (*Config, error) {
 	// Agente IA (F5). Sin AI_API_KEY el agente se deshabilita; no es un error
 	// de arranque para que el resto del sistema siga operativo.
 	cfg.AIEnabled = getBool("AI_ENABLED", true)
+	cfg.AIProvider = getEnv("AI_PROVIDER", "openai")
 	cfg.AIBaseURL = getEnv("AI_BASE_URL", "https://api.openai.com/v1")
 	cfg.AIAPIKey = os.Getenv("AI_API_KEY")
 	cfg.AIModel = getEnv("AI_MODEL", "gpt-4o-mini")

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_BOUNDS,
   computeBounds,
+  computeCenter,
   padBounds,
   projectPoint,
 } from './geometry'
@@ -19,6 +20,15 @@ describe('computeBounds', () => {
       { lat: 4.65, lon: -74.05 },
     ])
     expect(bounds).toEqual({ minLat: 4.6, maxLat: 4.7, minLon: -74.1, maxLon: -74.0 })
+  })
+})
+
+describe('computeCenter', () => {
+  it('calcula el centro geográfico promedio de todas las ubicaciones', () => {
+    expect(computeCenter([
+      { lat: 4.0, lon: -74.0 },
+      { lat: 6.0, lon: -72.0 },
+    ])).toEqual({ lat: 5, lon: -73 })
   })
 })
 

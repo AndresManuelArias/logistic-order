@@ -2,7 +2,7 @@
 COMPOSE ?= docker compose
 BACKEND_DIR := backend
 
-.PHONY: dev up db-up run-local down restart logs ps health seed test build vet fmt tidy psql e2e-f2 e2e-f3 test-web lint-web test-mobile lint-mobile gen-mobile-api seed-load load-test contract iac-validate iac-plan ci-local clean help
+.PHONY: dev up db-up run-local down restart logs ps health seed test build vet fmt tidy psql e2e-f2 e2e-f3 test-web lint-web install-mobile test-mobile lint-mobile gen-mobile-api seed-load load-test contract iac-validate iac-plan ci-local clean help
 
 help: ## Lista de comandos
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -72,6 +72,9 @@ test-web: ## Pruebas del portal y librerías compartidas (F4)
 
 lint-web: ## Typecheck + lint + build del portal (F4)
 	cd web && npm run typecheck && npm run lint && npm run build
+
+install-mobile: ## Instala dependencias de la app móvil (Node 20.19+ / 22 LTS)
+	cd mobile && npm ci
 
 test-mobile: ## Pruebas de la app móvil offline-first (F4)
 	cd mobile && npm test

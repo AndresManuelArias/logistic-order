@@ -135,13 +135,20 @@ func run() error {
 	// F5: agente IA operativo (RF-10) + circuit breaker del proveedor LLM
 	// (RNF-05). Sin AI_API_KEY el agente responde 503 controlado y el resto
 	// del sistema sigue funcionando.
+	//
+	// Patrón Strategy: NewProvider elige la implementación concreta de
+	// domain.ChatModel según AI_PROVIDER ("openai" o "gemini"). El use case
+	// no conoce al proveedor concreto.
 	aiRepo := aipostgres.NewAnalyticsRepository(pool)
 	aiAudit := aipostgres.NewAuditRepository(pool)
-	aiModel := aillm.New(aillm.Config{
+	aiModel, err := aillm.NewProvider(aillm.ProviderName(cfg.AIProvider), aillm.Config{
 		BaseURL: cfg.AIBaseURL,
 		APIKey:  cfg.AIAPIKey,
 		Timeout: cfg.AITimeout,
 	})
+	if err != nil {
+		return fmt.Errorf("agente IA: %w", err)
+	}
 	aiBreaker := resilience.New(resilience.Settings{
 		Name:             "ai-llm",
 		FailureThreshold: cfg.CBFailureThreshold,

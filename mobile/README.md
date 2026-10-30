@@ -33,6 +33,37 @@ npm run android             # requiere emulador/dispositivo + Android SDK
 `npm start` levanta Metro en modo dev client. **Expo Go no sirve para validar
 GPS en segundo plano** (limitación de Expo Go); usa un development build.
 
+### Android: SDK, emulador y JDK
+
+`expo run:android` necesita el SDK de Android y `adb`. Si faltan, el error es
+`Failed to resolve the Android SDK path` y `spawn adb ENOENT`; no es un problema
+del proyecto.
+
+```bash
+# Desde la raíz del repo: exporta ANDROID_HOME, PATH, GRADLE_USER_HOME y JDK 17.
+# Si el SDK vive fuera de $HOME (disco pequeño), indica la base:
+export ANDROID_TOOLCHAINS=/ruta/con/espacio/toolchains
+source scripts/android-env.sh
+
+sdkmanager --licenses
+sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" \
+           "emulator" "system-images;android-36;google_apis;x86_64"
+
+avdmanager create avd -n tiendas36 -k "system-images;android-36;google_apis;x86_64" -d pixel_7
+emulator -avd tiendas36 &
+adb devices          # debe listar el emulador como "device"
+
+cd mobile && npm run android
+```
+
+- `compileSdk`/`targetSdk` = **36** y `minSdk` = **24** (los fija Expo SDK 54).
+- Gradle 8.14 + React Native 0.81: usa **JDK 17** (el script lo detecta con
+  sdkman o `/usr/lib/jvm/java-17-*`).
+- El SDK ocupa ~7-9 GB entre platform, build-tools, emulador e imagen del
+  sistema; reserva ese espacio antes de instalarlo.
+- El emulador Android mapea `10.0.2.2` al loopback del host: es lo que permite
+  que `EXPO_PUBLIC_API_URL=http://10.0.2.2:8080` llegue al backend local.
+
 ### URL del backend
 
 | Entorno | `EXPO_PUBLIC_API_URL` |
