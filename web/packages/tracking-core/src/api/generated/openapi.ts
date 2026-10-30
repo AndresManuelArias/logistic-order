@@ -172,9 +172,13 @@ export interface paths {
         };
         /**
          * Lista paginada de tiendas disponibles
-         * @description Devuelve todas las tiendas registradas en la plataforma.
-         *     Accesible para cualquier usuario autenticado (`PROVIDER`, `STORE`,
-         *     `DRIVER`). Los tokens de invitado reciben `403`.
+         * @description Devuelve las tiendas con las que el proveedor autenticado tiene un
+         *     acuerdo comercial activo (`app.provider_store_agreements.status = 'ACTIVE'`).
+         *     Accesible únicamente para el rol `PROVIDER`.
+         *
+         *     La consulta hace JOIN entre `app.provider_store_agreements` y
+         *     `app.stores`, filtrando por `provider_id` del token. Los campos
+         *     devueltos son los mismos que los de `GET /api/v1/stores/me`.
          *
          *     Soporta búsqueda por nombre parcial (case-insensitive) y paginación
          *     mediante `limit` / `offset`.
@@ -235,9 +239,11 @@ export interface paths {
         get: operations["listOrders"];
         put?: never;
         /**
-         * Crea una orden (rol STORE)
-         * @description La orden queda siempre vinculada a la tienda del token autenticado:
-         *     enviar otro `store_id` devuelve `403`. `origin` y `destination` se
+         * Crea una orden (roles STORE y PROVIDER)
+         * @description STORE crea para su propia tienda; enviar otro `store_id` devuelve `403`.
+         *     PROVIDER puede crear una orden para una tienda existente indicando
+         *     `store_id`, siempre que el token incluya su `provider_id`. `origin` y
+         *     `destination` se
          *     persisten como `geometry(Point,4326)` con PostGIS (ADR-09) y
          *     `distance_meters` se calcula con `ST_DistanceSphere`.
          */
@@ -700,6 +706,8 @@ export interface components {
             status: components["schemas"]["OrderStatus"];
             /** Format: uuid */
             assigned_vehicle_id?: string;
+            /** @description Placa del vehículo asignado. Disponible en vistas autenticadas y seguimiento público. */
+            assigned_vehicle_plate?: string;
             /** Format: uuid */
             assigned_driver_id?: string;
             origin: components["schemas"]["Point"];

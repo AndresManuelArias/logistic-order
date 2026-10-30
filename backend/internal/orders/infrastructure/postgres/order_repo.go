@@ -23,7 +23,7 @@ func NewOrderRepository(pool *pgxpool.Pool) *OrderRepository { return &OrderRepo
 
 const orderCols = `
 	o.id::text, o.external_ref, o.store_id::text, o.customer_id::text, o.status::text,
-	o.assigned_vehicle_id::text, o.assigned_driver_id::text,
+	o.assigned_vehicle_id::text, v.plate, o.assigned_driver_id::text,
 	ST_Y(o.origin)::float8, ST_X(o.origin)::float8,
 	ST_Y(o.destination)::float8, ST_X(o.destination)::float8,
 	o.destination_address, o.distance_meters,
@@ -35,7 +35,7 @@ func scanOrder(row pgx.Row) (*domain.Order, error) {
 	var status string
 	err := row.Scan(
 		&o.ID, &o.ExternalRef, &o.StoreID, &o.CustomerID, &status,
-		&o.AssignedVehicleID, &o.AssignedDriverID,
+		&o.AssignedVehicleID, &o.AssignedVehiclePlate, &o.AssignedDriverID,
 		&o.Origin.Lat, &o.Origin.Lon, &o.Destination.Lat, &o.Destination.Lon,
 		&o.DestinationAddress, &o.DistanceMeters,
 		&o.PlacedAt, &o.PickedUpAt, &o.DeliveredAt, &o.CreatedAt, &o.UpdatedAt,
@@ -77,7 +77,7 @@ func (r *OrderRepository) Create(ctx context.Context, o *domain.Order) error {
 // FindByID busca por id.
 func (r *OrderRepository) FindByID(ctx context.Context, id string) (*domain.Order, error) {
 	o, err := scanOrder(r.pool.QueryRow(ctx,
-		`SELECT `+orderCols+` FROM app.orders o WHERE o.id = $1::uuid`, id))
+		`SELECT `+orderCols+` FROM app.orders o LEFT JOIN app.vehicles v ON v.id = o.assigned_vehicle_id WHERE o.id = $1::uuid`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
@@ -134,7 +134,7 @@ func (r *OrderRepository) List(ctx context.Context, f domain.ListFilter) ([]doma
 	listArgs := append(append([]any{}, args...), limit, offset)
 
 	rows, err := r.pool.Query(ctx,
-		`SELECT `+orderCols+` FROM app.orders o WHERE `+cond+`
+		`SELECT `+orderCols+` FROM app.orders o LEFT JOIN app.vehicles v ON v.id = o.assigned_vehicle_id WHERE `+cond+`
 		 ORDER BY o.placed_at DESC LIMIT $`+itoa(len(args)+1)+` OFFSET $`+itoa(len(args)+2),
 		listArgs...)
 	if err != nil {

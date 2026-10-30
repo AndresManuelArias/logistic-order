@@ -69,22 +69,23 @@ func (p Point) Valid() bool {
 
 // Order es la entidad central de logística.
 type Order struct {
-	ID                 string
-	ExternalRef        string
-	StoreID            string
-	CustomerID         *string
-	Status             Status
-	AssignedVehicleID  *string
-	AssignedDriverID   *string
-	Origin             Point
-	Destination        Point
-	DestinationAddress string
-	DistanceMeters     *float64
-	PlacedAt           time.Time
-	PickedUpAt         *time.Time
-	DeliveredAt        *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                   string
+	ExternalRef          string
+	StoreID              string
+	CustomerID           *string
+	Status               Status
+	AssignedVehicleID    *string
+	AssignedVehiclePlate *string
+	AssignedDriverID     *string
+	Origin               Point
+	Destination          Point
+	DestinationAddress   string
+	DistanceMeters       *float64
+	PlacedAt             time.Time
+	PickedUpAt           *time.Time
+	DeliveredAt          *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // CanTransitionTo aplica la máquina de estados sobre la entidad.

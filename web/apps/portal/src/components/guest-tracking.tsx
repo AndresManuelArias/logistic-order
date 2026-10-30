@@ -118,7 +118,7 @@ export function GuestTracking() {
     if (latest) {
       result.push({
         id: 'vehicle',
-        label: 'Tu pedido',
+        label: current.assigned_vehicle_plate ?? 'Vehículo',
         detail: `${formatSpeed(latest.speed_kph)} · ${formatFreshness(latest.time)}`,
         lat: latest.lat,
         lon: latest.lon,

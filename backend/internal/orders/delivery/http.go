@@ -286,26 +286,28 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 
 // orderResponse define el contrato público (ADR-10).
 type orderResponse struct {
-	ID                 string   `json:"id"`
-	ExternalRef        string   `json:"external_ref"`
-	StoreID            string   `json:"store_id"`
-	CustomerID         *string  `json:"customer_id,omitempty"`
-	Status             string   `json:"status"`
-	AssignedVehicleID  *string  `json:"assigned_vehicle_id,omitempty"`
-	AssignedDriverID   *string  `json:"assigned_driver_id,omitempty"`
-	Origin             pointDTO `json:"origin"`
-	Destination        pointDTO `json:"destination"`
-	DestinationAddress string   `json:"destination_address"`
-	DistanceMeters     *float64 `json:"distance_meters,omitempty"`
-	PlacedAt           string   `json:"placed_at"`
-	PickedUpAt         *string  `json:"picked_up_at,omitempty"`
-	DeliveredAt        *string  `json:"delivered_at,omitempty"`
+	ID                   string   `json:"id"`
+	ExternalRef          string   `json:"external_ref"`
+	StoreID              string   `json:"store_id"`
+	CustomerID           *string  `json:"customer_id,omitempty"`
+	Status               string   `json:"status"`
+	AssignedVehicleID    *string  `json:"assigned_vehicle_id,omitempty"`
+	AssignedVehiclePlate *string  `json:"assigned_vehicle_plate,omitempty"`
+	AssignedDriverID     *string  `json:"assigned_driver_id,omitempty"`
+	Origin               pointDTO `json:"origin"`
+	Destination          pointDTO `json:"destination"`
+	DestinationAddress   string   `json:"destination_address"`
+	DistanceMeters       *float64 `json:"distance_meters,omitempty"`
+	PlacedAt             string   `json:"placed_at"`
+	PickedUpAt           *string  `json:"picked_up_at,omitempty"`
+	DeliveredAt          *string  `json:"delivered_at,omitempty"`
 }
 
 func toOrderResponse(o *domain.Order) orderResponse {
 	r := orderResponse{
 		ID: o.ID, ExternalRef: o.ExternalRef, StoreID: o.StoreID, CustomerID: o.CustomerID,
-		Status: string(o.Status), AssignedVehicleID: o.AssignedVehicleID, AssignedDriverID: o.AssignedDriverID,
+		Status: string(o.Status), AssignedVehicleID: o.AssignedVehicleID,
+		AssignedVehiclePlate: o.AssignedVehiclePlate, AssignedDriverID: o.AssignedDriverID,
 		Origin:             pointDTO{Lat: o.Origin.Lat, Lon: o.Origin.Lon},
 		Destination:        pointDTO{Lat: o.Destination.Lat, Lon: o.Destination.Lon},
 		DestinationAddress: o.DestinationAddress, DistanceMeters: o.DistanceMeters,

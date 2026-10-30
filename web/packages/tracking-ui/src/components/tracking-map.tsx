@@ -36,6 +36,15 @@ export interface TrackingMapProps {
 
 const VIEW_HEIGHT = 420
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
 // Color mapping for tone -> marker colors
 const toneColors: Record<Tone, string> = {
   live: '#0f7b4a',
@@ -119,20 +128,26 @@ export function TrackingMap({
           <circle cx="12" cy="12" r="8" fill="${toneColors[marker.tone ?? 'neutral']}" stroke="#fff" stroke-width="2"/>
           ${selectedId === marker.id ? '<circle cx="12" cy="12" r="6" fill="#1d4ed8"/>' : ''}
         </svg>
-        <div class="tt-map-marker-label">${marker.label}</div>
+        <div class="tt-map-marker-label">${escapeHtml(marker.label)}</div>
       `
-
-      let mapMarker = markersRef.current.get(marker.id)
-      if (!mapMarker) {
-        mapMarker = new maplibregl.Marker(el).setLngLat([marker.lon, marker.lat]).addTo(map)
-        markersRef.current.set(marker.id, mapMarker)
-      } else {
-        mapMarker.setLngLat([marker.lon, marker.lat])
-      }
 
       el.style.cursor = 'pointer'
       el.onclick = () => {
         if (onSelect) onSelect(marker.id)
+      }
+
+      let mapMarker = markersRef.current.get(marker.id)
+      if (!mapMarker) {
+        mapMarker = new maplibregl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([marker.lon, marker.lat])
+          .addTo(map)
+        markersRef.current.set(marker.id, mapMarker)
+      } else {
+        const existingElement = mapMarker.getElement()
+        existingElement.innerHTML = el.innerHTML
+        existingElement.style.cursor = 'pointer'
+        existingElement.onclick = el.onclick
+        mapMarker.setLngLat([marker.lon, marker.lat])
       }
     }
 

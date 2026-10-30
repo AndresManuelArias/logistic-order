@@ -1440,6 +1440,9 @@ components:
         assigned_vehicle_id:
           type: string
           format: uuid
+        assigned_vehicle_plate:
+          type: string
+          description: Placa del vehículo asignado. Disponible en vistas autenticadas y seguimiento público.
         assigned_driver_id:
           type: string
           format: uuid
