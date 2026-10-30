@@ -3,9 +3,9 @@
 > **Documento maestro para agentes de IA.**
 > Cualquier agente que vaya a implementar, revisar o probar una parte del sistema **debe leer este documento completo antes de empezar** y respetar las decisiones aquí registradas. Si encuentra una contradicción con otro documento, este plan prevalece y debe escalarse al rol `architect`.
 
-- **Versión:** 1.1
+- **Versión:** 1.2
 - **Fecha:** 2026-10-29
-- **Estado:** F1–F6 implementadas; validación global pendiente de completar un cambio en curso en `stores`
+- **Estado:** F1–F6 completadas y validadas localmente (2026-10-29); los límites de entorno (AWS, macOS, `AI_API_KEY`, remoto Git) se detallan en §7 (F6) y §10
 - **Fuentes:** `doc/requeriment/*`, `doc/arquitectura/*` (monolito modular, microservicios, UML casos de uso, estructuras de carpetas)
 
 ---
@@ -237,9 +237,10 @@ mobile/src/
 - `POST /api/v1/auth/guest-token` (rol STORE/PROVIDER) → token de invitado para `order_id`
 - `POST /api/v1/auth/logout`
 
-**Tiendas** (rol STORE)
-- `POST /api/v1/stores` → alta de tienda en un paso propio del registro (409 si ya existe una)
-- `GET /api/v1/stores/me` → tienda del usuario (404 si el alta sigue pendiente)
+**Tiendas**
+- `POST /api/v1/stores` (rol STORE) → alta de tienda en un paso propio del registro (409 si ya existe una)
+- `GET /api/v1/stores/me` (rol STORE) → tienda del usuario (404 si el alta sigue pendiente)
+- `GET /api/v1/stores` (rol PROVIDER) → listado paginado de tiendas con filtro `name` (`limit` 1–200, `offset` ≥ 0). La implementación restringe el acceso a PROVIDER; la descripción del spec aún dice «cualquier usuario autenticado» y debe alinearse (R2)
 
 **Órdenes**
 - `POST /api/v1/orders` (idempotency; payload con `origin {lat,lon}` y **`destination {lat,lon}`** o dirección geocodificada) · `GET /api/v1/orders` (filtros: status, store, vehicle, rango de fechas, **radio en metros alrededor de un punto**) · `GET /api/v1/orders/{id}`
@@ -271,11 +272,11 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | Fase | Estado | Evidencia |
 |---|---|---|
 | **F1** | ✅ **Completada (2026-10-28)** | `docker compose up` OK; `/healthz` y `/readyz` 200; 4 migraciones aplicadas; hypertable + continuous aggregate + retención verificadas |
-| **F2** | ✅ **Completada (2026-10-28)** | Módulos `auth`, `orders` y `stores` + migraciones `0005_auth` y `0006_store_owner_unique`; JWT HS256 con refresh rotativo (hash SHA-256); RBAC de rol y de datos server-side (scope vacío = 403); máquina de estados con `order_events` transaccional; alta de tienda en paso propio del registro (`POST /api/v1/stores`, `GET /api/v1/stores/me`; `store` opcional en register — R11 resuelto); spec OpenAPI 3.1 embebida (`/swagger/index.html`, `/api/v1/openapi.json|yaml`); seed (1 proveedor, 2 tiendas, 3 conductores, 3 vehículos, 10 órdenes georreferenciadas); `go test -race ./...` OK y e2e `scripts/e2e_f2.sh` 72/72 casos OK |
+| **F2** | ✅ **Completada (2026-10-28)** | Módulos `auth`, `orders` y `stores` + migraciones `0005_auth` y `0006_store_owner_unique`; JWT HS256 con refresh rotativo (hash SHA-256); RBAC de rol y de datos server-side (scope vacío = 403); máquina de estados con `order_events` transaccional; alta de tienda en paso propio del registro (`POST /api/v1/stores`, `GET /api/v1/stores/me`; `store` opcional en register — R11 resuelto) y listado paginado para el proveedor (`GET /api/v1/stores`, rol PROVIDER, filtro `name` y `limit`/`offset`); spec OpenAPI 3.1 embebida (`/swagger/index.html`, `/api/v1/openapi.json|yaml`); seed (1 proveedor, 2 tiendas, 3 conductores, 3 vehículos, 10 órdenes georreferenciadas); `go test -race ./...` OK y e2e `scripts/e2e_f2.sh` 72/72 casos OK |
 | F3 | ✅ **Completada (2026-10-28)** | Módulo `telemetry` (ingesta individual y bulk idempotente por `Idempotency-Key` + `sync_receipts`, `latest`/`track` con RBAC y circuit breaker); bus interno `shared/eventbus` (Go channels, descarte contabilizado); hub `shared/websocket` con suscripciones validadas, revalidación de concesiones (`WS_GRANT_TTL`), cierre por expiración de token (`4401`) y por consumidor lento (`1008`); `POST /telemetry/points|bulk`, `GET /vehicles/{id}/latest|track` y `GET /ws` documentados en OpenAPI; seed con 90 puntos demo (30 por vehículo, validado con `curl` sobre `track`); `go test -race ./...` OK (16 paquetes) y e2e `scripts/e2e_f3.sh` 63/63 casos OK con latencia WS de **4,3 ms** (RNF-04 < 500 ms) |
 | F4 | ✅ **Completada (2026-10-28)** | Monorepo `web/` con `@tiendas/tracking-core` (cliente OpenAPI, refresh single-flight, `useTracking` con backoff/dedupe) y `@tiendas/tracking-ui` (mapa SVG accesible, tarjeta de orden, progreso); portal Next.js 16 con login, `/proveedor`, `/tienda` (dual), `/conductor` y `/seguimiento/{id}#t=…`; BFF same-origin con refresh en cookie `httpOnly`; `GET /api/v1/vehicles` para los paneles; 58 pruebas, typecheck/lint/build OK. App móvil Expo SDK 54 + RN 0.81 + WatermelonDB con GPS en segundo plano, cola write-ahead idempotente (`Idempotency-Key`), transiciones reconciliadas por `GET`, POD local y UI de conductor; 99 pruebas, typecheck y bundle Metro OK; idempotencia validada contra el backend real. Compilación nativa, GPS y permisos reales no validados por falta de emulador/Android SDK |
 | F5 | ✅ **Completada (2026-10-29)** | Módulo `aiagent` (`domain`/`usecase`/`infrastructure`/`delivery`) con catálogo cerrado de 4 herramientas y SQL scopeado por rol; adaptador LLM HTTP compatible con OpenAI (sin SDK, sirve OpenAI/Groq/Ollama/vLLM); `POST /api/v1/ai/query` con validación, bucle de tool-calling acotado (`AI_MAX_STEPS`), timeout global y circuit breaker dedicado (`ai-llm`); auditoría ampliada en `app.ai_query_log` (migración `0007`: estado, error, respuesta, modelo y `tools JSONB`); sin `AI_API_KEY` → `503 AI_NOT_CONFIGURED`; contrato OpenAPI + panel del portal integrados; `go test ./...` OK (incluye orquestador, herramientas, adaptador LLM, handler, config y contrato) y 58 pruebas web OK. Prueba con proveedor real pendiente: no hay API key en el entorno |
-| F6 | 🟡 **Implementada (2026-10-29)** — validación global bloqueada | k6 real (100 VUs + 20 WS): p95 ingesta 11,8 ms, p95 WS 11 ms, 0 5xx, 105 duplicados, 23 `422`; rate limiting con `429`/`Retry-After` validado E2E; Terraform `fmt`/`validate`/`plan` offline (36 recursos); Spectral sin errores; `govulncheck` 0; CI con 8 jobs, Fastlane y bundle Expo; auditoría `doc/seguridad/auditoria_f6.md`. **Pendiente:** `go vet ./...`/`go test ./...` globales fallan por un cambio ajeno en curso en `stores.List`; `apply` AWS y build nativo iOS no ejecutables en este entorno |
+| F6 | ✅ **Completada (2026-10-29)** | k6 real (100 VUs + 20 WS): p95 ingesta 11,8 ms, p95 WS 11 ms, 0 5xx, 105 duplicados, 23 `422`; rate limiting con `429`/`Retry-After` validado E2E; Terraform `fmt`/`validate`/`plan` offline (36 recursos); Spectral sin errores; `govulncheck` 0; CI con 8 jobs, Fastlane y bundle Expo; auditoría `doc/seguridad/auditoria_f6.md`; `go vet ./...` y `go test ./...` globales en verde. **Límites:** `apply` AWS y build nativo iOS no ejecutables en este entorno |
 
 > **Orden estricto:** una fase no arranca hasta que sus dependencias estén entregadas. Cada tarea indica el **agente responsable** (definidos en `.opencode/agents/`). El frontend y el móvil pueden **iniciar en paralelo** contra contratos mock (OpenAPI de F2).
 
@@ -303,7 +304,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   4. Token de invitado para Cliente Final, con expiración y scope `order:<id>`.
   5. Seed de datos demo (1 proveedor, 2 tiendas con `location`, 3 conductores, 10 órdenes **con `origin` y `destination` georreferenciadas**).
   6. **Swagger/OpenAPI:** especificación `backend/api/openapi.yaml` (OpenAPI 3.1) con todos los endpoints de F2, servida como Swagger UI en `/swagger/index.html` y spec JSON en `/api/v1/openapi.json`.
-  7. **Alta de tienda en paso propio (R11):** módulo `stores` con `POST /api/v1/stores` y `GET /api/v1/stores/me`; `store` pasa a opcional en el registro y "una tienda por dueño" se protege con índice único (migración `0006`).
+  7. **Alta de tienda en paso propio (R11):** módulo `stores` con `POST /api/v1/stores`, `GET /api/v1/stores/me` y `GET /api/v1/stores` (listado paginado con filtro `name`, rol PROVIDER); `store` pasa a opcional en el registro y "una tienda por dueño" se protege con índice único (migración `0006`).
 - **Criterio de aceptación:** un usuario de un rol **nunca** puede leer recursos de otro rol (probado); transiciones inválidas → 409.
 - **Pruebas:** unitarias de dominio y casos de uso; integración API del happy path y de denegación por rol.
 
@@ -364,9 +365,9 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - **Criterio de aceptación:** "¿Qué vehículos llevan detenidos más de 20 minutos?" devuelve filas reales con la herramienta correcta; sin API key → error controlado, no 500 inesperado.
   - **Cumplido en pruebas automáticas:** el orquestador con `ChatModel` falso ejecuta `get_stopped_vehicles`, propaga argumentos y devuelve la respuesta auditada; el handler mapea `503 AI_NOT_CONFIGURED` y `503 CIRCUIT_OPEN` sin 500. La consulta real con proveedor LLM queda pendiente porque el entorno no tiene `AI_API_KEY`; el SQL y la semilla están preparados para devolver la parada demo de 25 min.
 - **Pruebas:** unitarias del orquestador (herramienta correcta, defaults, argumentos inválidos, herramienta desconocida, error de repositorio, error de proveedor, circuito abierto, máximo de pasos, auditoría en éxito/fallo), del registro, del adaptador LLM (`httptest`), del handler (200/401/403/422/502/503/504) y de `ETAMinutes`; contrato OpenAPI ampliado; `go vet ./...` y `go test ./...` en verde; 58 pruebas web OK.
-- **Límites/supuestos:** sin fallback determinista sin LLM (se prioriza no simular respuestas); `area` = fragmento de nombre/dirección de tienda; ETA = distancia en línea recta / velocidad (última muestra o 30 km/h); «retrasada» = pendiente > `hours` (def. 24). No hay rate limiting por usuario (se anota para F6).
+- **Límites/supuestos:** sin fallback determinista sin LLM (se prioriza no simular respuestas); `area` = fragmento de nombre/dirección de tienda; ETA = distancia en línea recta / velocidad (última muestra o 30 km/h); «retrasada» = pendiente > `hours` (def. 24). El rate limiting por usuario se añadió en F6 (`shared/ratelimit`: login por IP; telemetría/IA por usuario).
 
-### F6 — Pruebas de carga, IaC, CI/CD y documentación 🟡 IMPLEMENTADA (2026-10-29)
+### F6 — Pruebas de carga, IaC, CI/CD y documentación ✅ COMPLETADA (2026-10-29)
 - **Objetivo:** RNF-06, RNF-08, RNF-09 + documentación final.
 - **Depende de:** F3–F5.
 - **Agentes:** `qa`, `devops`, `security`.
@@ -412,18 +413,16 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   en código llamado**. `npm audit` web: 0; móvil: 15 residuales de `postcss`
   transitivo de Expo (fix incompatible). README raíz con la sección
   **Auditoría del uso de la IA** (dos casos verificables).
-- **Validación local (antes del cambio ajeno):** `gofmt`, `go vet ./...`,
-  `go test ./...` y `go test -race` de los paquetes tocados estaban en verde;
-  además, 58 pruebas web, 99 pruebas móvil, typecheck/lint/build del portal,
-  bundle Expo Android, `docker compose config`, builds Docker de backend y web,
-  Spectral y Terraform correctos.
-- **Bloqueo de validación (2026-10-29):** el árbol de trabajo contiene cambios
-  en curso ajenos a F6 en `backend/internal/stores`: `List` recibe
-  `domain.ListFilter`, pero `StoresUseCase.List` llama con `200`. Por eso
-  `go vet ./...`, `go test ./...` y el job `backend` del CI fallan en
-  `stores.go:97`. Los paquetes de F6 (`shared/ratelimit`, `shared/openapi`)
-  compilan y pasan sus pruebas de forma aislada. **F6 no se marcará como verde
-  hasta completar ese cambio.**
+- **Validación local (2026-10-29):** `gofmt`, `go vet ./...`, `go test ./...` y
+  `go test -race` de los paquetes tocados (`shared/ratelimit`,
+  `shared/httpserver`, `telemetry`, `aiagent`, `stores`) en verde; 58 pruebas
+  web, 99 pruebas móvil, typecheck/lint/build del portal, bundle Expo Android,
+  `docker compose config`, builds Docker de backend y web, Spectral y Terraform
+  correctos.
+- **Resolución de R13:** el cambio en curso de `stores` se completó:
+  `StoresUseCase.List` usa `usecase.ListInput` y `domain.ListFilter`; `go vet
+  ./...` y `go test ./...` vuelven a pasar (exit 0), con lo que el job `backend`
+  del CI queda desbloqueado.
 - **Límites:** no hay credenciales AWS (no se ejecutó `apply` ni un plan real),
   ni macOS/Xcode (no se generó binario iOS), ni `AI_API_KEY` real. El pipeline
   remoto no se ejecutó porque el repositorio no tiene remoto configurado; los
@@ -482,10 +481,10 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 - Carga: k6 en F6 con los umbrales definidos.
 - Contrato: `scripts/contract/check_openapi.sh` (pruebas Go + Spectral).
 - IaC: `terraform fmt -check`, `validate` y `plan -var offline_plan=true`.
-- **Estado (2026-10-29):** la suite global está bloqueada por el cambio en curso
-  de `stores` (R13). Hasta completarlo, usar `make contract`, `make iac-validate`,
-  las pruebas web/móvil y las pruebas aisladas de `shared/ratelimit` y
-  `shared/openapi` como evidencia parcial.
+- **Estado (2026-10-29):** suite global en verde (`go vet ./...`, `go test ./...`
+  y `go test -race` de los paquetes concurrentes). El pipeline remoto no se ha
+  ejecutado porque el repositorio no tiene remoto configurado; los jobs se
+  reproducen localmente salvo Fastlane (sin Ruby en el host).
 
 ---
 
@@ -494,7 +493,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | # | Tema | Tipo | Nota |
 |---|---|---|---|
 | R1 | `estructura_carpeta_portal_web_multi_rol.md` está duplicado con la estructura móvil | **Doc defectuoso** | Corregir o reemplazar por la §4.2 |
-| R2 | Spec OpenAPI desincronizándose de la implementación | **Mitigado en F2/F3/F6** | Spec creada y embebida en el binario; test `internal/shared/openapi` exige que cubra todos los endpoints y que todos los `$ref` internos resuelvan. En F6 se añadió `scripts/contract/check_openapi.sh` (pruebas Go + Spectral) y `.spectral.yaml`; el contrato pasa sin errores. Mantener la validación en cada tarea de endpoint (ADR-10) |
+| R2 | Spec OpenAPI desincronizándose de la implementación | **Mitigado en F2/F3/F6** | Spec creada y embebida en el binario; test `internal/shared/openapi` exige que el spec cubra la lista de endpoints F2/F3 y que todos los `$ref` internos resuelvan (falta añadir `GET /api/v1/stores` a esa lista). En F6 se añadió `scripts/contract/check_openapi.sh` (pruebas Go + Spectral) y `.spectral.yaml`; el contrato pasa sin errores. Mantener la validación en cada tarea de endpoint (ADR-10). Deriva menor detectada: la descripción de `GET /api/v1/stores` dice «cualquier usuario autenticado», pero ruta y caso de uso exigen PROVIDER; alinear el texto del spec |
 | R3 | Motor LLM y proveedor de mapas sin definir | **Decisión pendiente** | Afecta coste, claves y latencia; configurable por env |
 | R4 | Volumen real de vehículos y frecuencia de GPS desconocida | **Supuesto** | El plan asume cientos de vehículos (RNF-06); no hay cifras confirmadas |
 | R5 | Retención y coste de TimescaleDB no definidos | Pendiente | Definir política de retención antes de producción |
@@ -505,7 +504,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | R10 | Swagger spec desincronizado de la implementación | **Mitigado en F6** | ADR-10 + `scripts/contract/check_openapi.sh` en CI (Spectral con `--fail-severity=error` + pruebas Go del spec y `$ref`) |
 | R12 | Autenticación del handshake WS en navegadores | **Resuelto (2026-10-28)** | Los navegadores no pueden fijar `Authorization` en el handshake: `/ws` acepta `?access_token=` además del header. El token sigue siendo el mismo access token JWT, se valida en servidor y la sesión se cierra al expirar (`4401`). Los clientes nativos usan el header |
 | R9 | Origen de la geocodificación de `orders.destination` sin definir | **Pendiente** | ¿El cliente envía lat/lon o dirección? Definir quién geocodifica (cliente, backend o proveedor externo) — ver `doc/arquitectura/database/modelo_datos.md` §6 |
-| R13 | Cambio en curso en `stores` rompe la compilación global | **Bloqueo temporal** | `StoresUseCase.List` pasa `200` a `domain.ListFilter` (`stores.go:97`). No pertenece a F6; hay que completarlo antes de declarar el pipeline verde |
+| R13 | Cambio en curso en `stores` rompía la compilación global | **Resuelto (2026-10-29)** | `StoresUseCase.List` ya usa `usecase.ListInput` y `domain.ListFilter`; `go vet ./...` y `go test ./...` en verde. No era un defecto de F6 |
 | R14 | Rate limiting en memoria por instancia | **Aceptado (F6)** | Con varias réplicas ECS el límite efectivo se multiplica. Mitigación recomendada: regla rate-based en AWS WAF o backend Redis (requiere ADR) |
 | R15 | RDS no soporta TimescaleDB | **Limitación de IaC** | El Terraform de F6 es un despliegue de referencia; para telemetría usar Timescale Cloud o PostgreSQL autogestionado con `timescale/timescaledb-ha` (ver `infra/README.md`) |
 | R16 | `npm audit` móvil con 15 vulnerabilidades transitivas | **Abierto (upstream)** | `postcss` dentro de Expo SDK 54; el fix automático propone `expo@51` (breaking). El job `security` lo reporta sin bloquear |
@@ -515,8 +514,9 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 
 ## 11. Validación Final (checklist de arquitectura)
 
-**Estado global:** F1–F5 verificadas; F6 implementada y validada por componentes,
-con la validación global pendiente del cambio en curso en `stores` (R13).
+**Estado global:** F1–F6 verificadas y validadas localmente (2026-10-29). Los
+límites de entorno (AWS, macOS, `AI_API_KEY`, remoto Git) se registran en §7 (F6)
+y §10.
 
 | Control | Estado | Evidencia |
 |---|---|---|
@@ -533,9 +533,9 @@ con la validación global pendiente del cambio en curso en `stores` (R13).
 | Rate limiting en login/telemetría/IA | ✅ | `shared/ratelimit`; prueba E2E 429 + `Retry-After` |
 | k6 cumple umbrales RNF-04/RNF-06 | ✅ | p95 ingesta 11,8 ms; p95 WS 11 ms; 0 5xx |
 | `terraform plan` sin errores | ✅ (offline) | 36 recursos; `apply` real pendiente de credenciales AWS |
-| Pipeline completo verde | 🟡 | Jobs definidos y reproducidos localmente; falta cerrar R13 y ejecutar en remoto |
+| Pipeline completo verde | ✅ (local) | Todos los jobs salvo `fastlane` reproducidos localmente (sin Ruby en el host); la ejecución en GitHub Actions sigue pendiente (repositorio sin remoto) |
 | Auditoría de seguridad §9.4 | ✅ | `doc/seguridad/auditoria_f6.md` (10 hallazgos) |
 
-> Los controles ✅ de F6 no implican que el repositorio compile globalmente en
-> este instante: R13 es un cambio ajeno en curso. Al completarlo, ejecutar
-> `make ci-local` y actualizar la fila «Pipeline completo verde».
+> La validación local está completa. Los únicos controles no ejecutables en este
+> entorno son el `apply` real de Terraform, el build/firma iOS y la ejecución del
+> pipeline en GitHub Actions; quedan registrados como límites, no como fallos.
