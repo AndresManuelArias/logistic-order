@@ -68,7 +68,7 @@ func TestGeminiCompleteParseaToolCall(t *testing.T) {
 		Tools: []domain.ToolDefinition{{
 			Name:        "get_stopped_vehicles",
 			Description: "Vehículos detenidos",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"minutes":{"type":"integer"}}}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"minutes":{"type":"integer","minimum":1}},"additionalProperties":false}`),
 		}},
 		Temperature: 0,
 		MaxTokens:   400,
@@ -108,8 +108,19 @@ func TestGeminiCompleteParseaToolCall(t *testing.T) {
 		t.Fatalf("tools en petición = %d, esperado 1", len(tools))
 	}
 	toolObj, _ := tools[0].(map[string]any)
-	if _, ok := toolObj["functionDeclarations"]; !ok {
-		t.Error("tools debe tener functionDeclarations")
+	declarations, _ := toolObj["functionDeclarations"].([]any)
+	if len(declarations) != 1 {
+		t.Fatal("tools debe tener una función")
+	}
+	declaration, _ := declarations[0].(map[string]any)
+	parameters, _ := declaration["parameters"].(map[string]any)
+	if _, ok := parameters["additionalProperties"]; ok {
+		t.Error("Gemini no acepta additionalProperties")
+	}
+	properties, _ := parameters["properties"].(map[string]any)
+	minutes, _ := properties["minutes"].(map[string]any)
+	if _, ok := minutes["minimum"]; ok {
+		t.Error("Gemini no acepta minimum")
 	}
 }
 

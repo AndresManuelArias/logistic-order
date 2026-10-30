@@ -50,7 +50,12 @@ export const GPS_POLICY: GpsPolicy = {
   // resolución para la traza y ~4 muestras/min en lugar de 1/s.
   timeIntervalMs: 15_000,
   distanceIntervalM: 25,
-  accuracy: 'Balanced',
+  // `High` (GPS) y no `Balanced`: en Android `Balanced` se traduce a
+  // PRIORITY_BALANCED_POWER_ACCURACY, que FusedLocationProvider resuelve con
+  // localización por red. En un equipo sin ese proveedor (o sin datos de red)
+  // no llega nunca una muestra, aunque el GPS esté disponible. La traza de
+  // ruta necesita GPS; el ahorro de batería se mantiene con 15 s / 25 m.
+  accuracy: 'High',
   maxAccuracyMeters: 100,
 }
 

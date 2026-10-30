@@ -48,9 +48,10 @@ const (
 
 // ToolCall es una herramienta elegida por el modelo.
 type ToolCall struct {
-	ID        string
-	Name      string
-	Arguments string // JSON crudo; se valida antes de ejecutar
+	ID               string
+	Name             string
+	Arguments        string // JSON crudo; se valida antes de ejecutar
+	ThoughtSignature string
 }
 
 // ToolInvocation es el resultado auditable de una llamada a herramienta.

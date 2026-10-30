@@ -21,6 +21,18 @@ function createHarness(options: { refreshError?: AppError } = {}) {
 }
 
 describe('SessionService', () => {
+  it('devuelve la misma instantánea mientras no cambie el estado', async () => {
+    const { service } = createHarness()
+    const before = service.getSnapshot()
+    expect(service.getSnapshot()).toBe(before)
+
+    await service.login('conductor1@tiendas.dev', 'Conductor123')
+
+    const after = service.getSnapshot()
+    expect(after).not.toBe(before)
+    expect(service.getSnapshot()).toBe(after)
+  })
+
   it('inicia sesión, persiste los tokens y publica la instantánea', async () => {
     const { service, repository } = createHarness()
     const snapshots: string[] = []

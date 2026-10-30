@@ -33,6 +33,13 @@ const DEFAULT_SKEW_MS = 30_000
 export class SessionService {
   private session: StoredSession | null = null
   private status: SessionStatus = 'unknown'
+  /**
+   * Instantánea cacheada: `useSyncExternalStore` exige que `getSnapshot`
+   * devuelva siempre la misma referencia mientras el estado no cambie. Crear el
+   * objeto en cada llamada provoca un bucle infinito de renders
+   * («Maximum update depth exceeded»).
+   */
+  private snapshot: SessionSnapshot = { status: 'unknown', user: null }
   private readonly listeners = new Set<SessionListener>()
   private refreshInFlight: Promise<string | null> | null = null
   private hydrateInFlight: Promise<void> | null = null
@@ -42,10 +49,7 @@ export class SessionService {
     this.skewMs = deps.skewMs ?? DEFAULT_SKEW_MS
   }
 
-  getSnapshot = (): SessionSnapshot => ({
-    status: this.status,
-    user: this.session?.user ?? null,
-  })
+  getSnapshot = (): SessionSnapshot => this.snapshot
 
   subscribe = (listener: SessionListener): (() => void) => {
     this.listeners.add(listener)
@@ -230,7 +234,7 @@ export class SessionService {
 
   private setSnapshot(status: SessionStatus, user: User | null): void {
     this.status = status
-    const snapshot: SessionSnapshot = { status, user }
-    for (const listener of this.listeners) listener(snapshot)
+    this.snapshot = { status, user }
+    for (const listener of this.listeners) listener(this.snapshot)
   }
 }

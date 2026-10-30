@@ -3,8 +3,9 @@
 // No usa SDK: solo net/http + encoding/json para mantener las dependencias mínimas.
 //
 // Documentación del protocolo:
-//   https://ai.google.dev/api/generate-content
-//   https://ai.google.dev/api/caching#Tool
+//
+//	https://ai.google.dev/api/generate-content
+//	https://ai.google.dev/api/caching#Tool
 package llm
 
 import (
@@ -122,17 +123,20 @@ type geminiContent struct {
 // geminiPart cubre los tres tipos que usamos: texto, functionCall y functionResponse.
 // Los campos se omiten cuando están vacíos para que Gemini no rechace el request.
 type geminiPart struct {
-	Text             string                `json:"text,omitempty"`
-	FunctionCall     *geminiFunctionCall   `json:"functionCall,omitempty"`
-	FunctionResponse *geminiFunctionResp   `json:"functionResponse,omitempty"`
+	Text             string              `json:"text,omitempty"`
+	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
+	FunctionResponse *geminiFunctionResp `json:"functionResponse,omitempty"`
+	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
 }
 
 type geminiFunctionCall struct {
+	ID   string          `json:"id,omitempty"`
 	Name string          `json:"name"`
 	Args json.RawMessage `json:"args"`
 }
 
 type geminiFunctionResp struct {
+	ID       string          `json:"id,omitempty"`
 	Name     string          `json:"name"`
 	Response json.RawMessage `json:"response"`
 }
@@ -148,8 +152,8 @@ type geminiFunctionDecl struct {
 }
 
 type geminiGenConfig struct {
-	Temperature    float64 `json:"temperature"`
-	MaxOutputTokens int    `json:"maxOutputTokens,omitempty"`
+	Temperature     float64 `json:"temperature"`
+	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
 }
 
 // geminiResponse es la respuesta de generateContent.
@@ -195,13 +199,50 @@ func toGeminiRequest(req domain.ChatRequest) geminiRequest {
 			decls = append(decls, geminiFunctionDecl{
 				Name:        t.Name,
 				Description: t.Description,
-				Parameters:  t.Parameters,
+				Parameters:  geminiToolParameters(t.Parameters),
 			})
 		}
 		out.Tools = []geminiTool{{FunctionDeclarations: decls}}
 	}
 
 	return out
+}
+
+// Gemini acepta un subconjunto de JSON Schema en function declarations.
+// Los esquemas JSON estándar usados por el resto de agentes (por ejemplo,
+// additionalProperties o format) hacen que Gemini rechace toda la petición.
+func geminiToolParameters(raw json.RawMessage) json.RawMessage {
+	var schema map[string]any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return json.RawMessage(`{"type":"object"}`)
+	}
+	sanitizeGeminiSchema(schema)
+	clean, err := json.Marshal(schema)
+	if err != nil {
+		return json.RawMessage(`{"type":"object"}`)
+	}
+	return clean
+}
+
+func sanitizeGeminiSchema(schema map[string]any) {
+	unsupported := []string{
+		"additionalProperties", "minLength", "maxLength", "minimum", "maximum",
+		"exclusiveMinimum", "exclusiveMaximum", "multipleOf", "pattern", "format",
+		"default", "examples", "$schema", "$id", "definitions", "$defs",
+	}
+	for _, key := range unsupported {
+		delete(schema, key)
+	}
+	if properties, ok := schema["properties"].(map[string]any); ok {
+		for _, value := range properties {
+			if child, ok := value.(map[string]any); ok {
+				sanitizeGeminiSchema(child)
+			}
+		}
+	}
+	if items, ok := schema["items"].(map[string]any); ok {
+		sanitizeGeminiSchema(items)
+	}
 }
 
 func messageToGeminiContent(m domain.Message) geminiContent {
@@ -233,9 +274,11 @@ func messageToGeminiContent(m domain.Message) geminiContent {
 		}
 		content.Parts = append(content.Parts, geminiPart{
 			FunctionCall: &geminiFunctionCall{
+				ID:   tc.ID,
 				Name: tc.Name,
 				Args: args,
 			},
+			ThoughtSignature: tc.ThoughtSignature,
 		})
 	}
 
@@ -249,6 +292,7 @@ func messageToGeminiContent(m domain.Message) geminiContent {
 		}
 		content.Parts = []geminiPart{{
 			FunctionResponse: &geminiFunctionResp{
+				ID:       m.ToolCallID,
 				Name:     m.Name,
 				Response: responseJSON,
 			},
@@ -278,17 +322,19 @@ func fromGeminiResponse(parsed geminiResponse, model string) (domain.ChatRespons
 	for _, part := range candidate.Parts {
 		switch {
 		case part.FunctionCall != nil:
-			// Normalizar args: Gemini puede devolver un objeto vacío.
 			args := string(part.FunctionCall.Args)
 			if args == "" || args == "null" {
 				args = "{}"
 			}
-			// Gemini no devuelve un ID por tool call; generamos uno determinista.
-			id := "gemini-" + part.FunctionCall.Name
+			id := part.FunctionCall.ID
+			if id == "" {
+				id = "gemini-" + part.FunctionCall.Name
+			}
 			out.Message.ToolCalls = append(out.Message.ToolCalls, domain.ToolCall{
-				ID:        id,
-				Name:      part.FunctionCall.Name,
-				Arguments: args,
+				ID:               id,
+				Name:             part.FunctionCall.Name,
+				Arguments:        args,
+				ThoughtSignature: part.ThoughtSignature,
 			})
 		case part.Text != "":
 			out.Message.Content += part.Text

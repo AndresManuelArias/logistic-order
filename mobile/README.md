@@ -208,8 +208,14 @@ la misma promesa y no crean dos lotes con claves distintas.
 
 ## 5. GPS, batería y permisos
 
-- Frecuencia: **15 s o 25 m**, precisión `Balanced`, filtro de precisión 100 m.
+- Frecuencia: **15 s o 25 m**, precisión `High`, filtro de precisión 100 m.
   Son ~4 muestras/min, suficiente para la traza sin vaciar la batería.
+- **Por qué `High` y no `Balanced`:** en Android, `Balanced` se traduce a
+  `PRIORITY_BALANCED_POWER_ACCURACY`, que FusedLocationProvider resuelve con
+  localización por red (`Nlp`), sin pedir GPS. Si el equipo no tiene ese
+  proveedor (emulador sin servicios de red de Google, dispositivo sin datos) no
+  llega **ninguna** muestra aunque el GPS esté disponible. Con `High`
+  (`PRIORITY_HIGH_ACCURACY`) la petición incluye `GpsBatch[requested=true]`.
 - **Segundo plano:** `expo-location` + `expo-task-manager` con foreground service
   en Android (notificación persistente) y `UIBackgroundModes: location` en iOS.
 - Si el usuario sólo concede «mientras uso la app», se usa `watchPositionAsync` y
@@ -356,6 +362,7 @@ permisos reales, cámara, ciclo de vida en segundo plano y consumo de batería.
 | «La sesión caducó» | Refresh revocado o expirado | Volver a iniciar sesión; la cola local se mantiene |
 | No aparece el permiso «Siempre» | iOS exige conceder primero «Al usar la app» y luego volver a solicitar | Ajustes → Ubicación → Siempre |
 | El GPS no avanza en Expo Go | Limitación de Expo Go | Usar `expo prebuild` + dev client |
+| GPS activo pero 0 puntos | La petición es de red y no de GPS | `adb shell dumpsys activity service com.google.android.gms/com.google.android.location.internal.GoogleLocationManagerService \| grep -E "tiendas\|HIGH_ACCURACY\|GpsBatch"`; debe aparecer `HIGH_ACCURACY` y `GpsBatch[requested=true]` |
 | App no arranca («base local») | SQLite corrupta o migración fallida | Reabrir; si persiste, reinstalar (se pierde la cola local) |
 | Bundle falla tras cambiar `.env` | Metro cachea variables build-time | Reiniciar Metro con `--clear` |
 
