@@ -68,28 +68,51 @@ func (r *StoreRepository) List(ctx context.Context, f domain.ListFilter) ([]doma
 		offset = 0
 	}
 
-	// Construye WHERE dinámico según si hay filtro de nombre.
+	// La consulta siempre pasa por provider_store_agreements para asegurar
+	// que el proveedor solo ve sus tiendas con acuerdo ACTIVE (RF-02).
+	// El filtro de nombre es opcional y se aplica como predicado adicional.
+	//
+	// Estructura de parámetros:
+	//   $1 = provider_id  (siempre presente)
+	//   $2 = nombre LIKE  (solo cuando f.Name != "")
+	//   $N-1 = limit
+	//   $N   = offset
+	const baseFrom = `
+		FROM app.provider_store_agreements psa
+		JOIN app.stores s ON s.id = psa.store_id
+		WHERE psa.provider_id = $1::uuid
+		  AND psa.status = 'ACTIVE'`
+
 	var (
-		countQuery string
-		listQuery  string
+		extraWhere string
 		args       []any
 	)
+	args = append(args, f.ProviderID)
+
 	if strings.TrimSpace(f.Name) != "" {
-		args = []any{"%" + strings.ToLower(strings.TrimSpace(f.Name)) + "%", limit, offset}
-		countQuery = `SELECT count(*) FROM app.stores WHERE lower(name) LIKE $1`
-		listQuery = `SELECT ` + storeCols + ` FROM app.stores WHERE lower(name) LIKE $1 ORDER BY name LIMIT $2 OFFSET $3`
-	} else {
-		args = []any{limit, offset}
-		countQuery = `SELECT count(*) FROM app.stores`
-		listQuery = `SELECT ` + storeCols + ` FROM app.stores ORDER BY name LIMIT $1 OFFSET $2`
+		args = append(args, "%"+strings.ToLower(strings.TrimSpace(f.Name))+"%")
+		extraWhere = fmt.Sprintf(" AND lower(s.name) LIKE $%d", len(args))
 	}
 
+	// COUNT total antes de paginar.
 	var total int
-	if err := r.pool.QueryRow(ctx, countQuery, args[:len(args)-2]...).Scan(&total); err != nil {
+	if err := r.pool.QueryRow(ctx,
+		`SELECT count(*)`+baseFrom+extraWhere, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("stores.list.count: %w", err)
 	}
 
-	rows, err := r.pool.Query(ctx, listQuery, args...)
+	// Página de resultados.
+	args = append(args, limit, offset)
+	limitArg := fmt.Sprintf("$%d", len(args)-1)
+	offsetArg := fmt.Sprintf("$%d", len(args))
+
+	const storePrefixed = `s.id::text, s.name, s.owner_user_id::text, s.address,
+		ST_Y(s.location::geometry), ST_X(s.location::geometry), s.created_at`
+
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+storePrefixed+baseFrom+extraWhere+
+			` ORDER BY s.name LIMIT `+limitArg+` OFFSET `+offsetArg,
+		args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("stores.list: %w", err)
 	}

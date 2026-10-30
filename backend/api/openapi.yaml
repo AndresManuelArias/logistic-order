@@ -348,9 +348,13 @@ paths:
       operationId: listStores
       summary: Lista paginada de tiendas disponibles
       description: |
-        Devuelve todas las tiendas registradas en la plataforma.
-        Accesible para cualquier usuario autenticado (`PROVIDER`, `STORE`,
-        `DRIVER`). Los tokens de invitado reciben `403`.
+        Devuelve las tiendas con las que el proveedor autenticado tiene un
+        acuerdo comercial activo (`app.provider_store_agreements.status = 'ACTIVE'`).
+        Accesible únicamente para el rol `PROVIDER`.
+
+        La consulta hace JOIN entre `app.provider_store_agreements` y
+        `app.stores`, filtrando por `provider_id` del token. Los campos
+        devueltos son los mismos que los de `GET /api/v1/stores/me`.
 
         Soporta búsqueda por nombre parcial (case-insensitive) y paginación
         mediante `limit` / `offset`.

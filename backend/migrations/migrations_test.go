@@ -58,3 +58,23 @@ func TestMigracionPostGISPresente(t *testing.T) {
 		t.Error("0003 debería definir orders.destination como geometry(Point, 4326)")
 	}
 }
+
+// Migración 0008: alianzas proveedor-tienda con unicidad por par.
+func TestMigracionProviderStoreAgreements(t *testing.T) {
+	data, err := FS.ReadFile("0008_provider_store_agreements.sql")
+	if err != nil {
+		t.Fatalf("0008_provider_store_agreements.sql no encontrada: %v", err)
+	}
+	sql := string(data)
+	for _, want := range []string{
+		"CREATE TABLE app.provider_store_agreements",
+		"REFERENCES app.users(id)",
+		"REFERENCES app.stores(id)",
+		"UNIQUE (provider_id, store_id)",
+		"idx_stores_location_geography",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("0008 debería contener %q", want)
+		}
+	}
+}

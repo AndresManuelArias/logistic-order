@@ -38,6 +38,16 @@ package "Esquema `app` (PostgreSQL + PostGIS)" #E8F0FE {
         * created_at : TIMESTAMPTZ
     }
 
+    entity "provider_store_agreements" as provider_store_agreements {
+        * id : UUID <<PK>>
+        --
+        * provider_id : UUID <<FK>>
+        * store_id : UUID <<FK>>
+        * status : provider_store_status <<ACTIVE | INACTIVE>>
+        * created_at : TIMESTAMPTZ
+        * updated_at : TIMESTAMPTZ
+    }
+
     entity "vehicles" as vehicles {
         * id : UUID <<PK>>
         --
@@ -175,6 +185,8 @@ package "Esquema `telemetry` (TimescaleDB + PostGIS)" #FFE8E8 {
 ' ============ RELACIONES ============
 
 users ||--o{ stores : "posee (rol STORE)"
+users ||--o{ provider_store_agreements : "proveedor aliado (rol PROVIDER)"
+stores ||--o{ provider_store_agreements : "acuerdo comercial"
 users ||--o{ drivers : "es conductor (rol DRIVER)"
 users ||--o{ ai_query_log : "consulta IA"
 
@@ -224,6 +236,19 @@ note right of points
 
   `telemetry.stops` = continuous aggregate con política de
   refresco automático (ej. 1 min) — no se inserta a mano.
+end note
+
+
+note bottom of provider_store_agreements
+  **Alianza proveedor ↔ tienda (migración 0008):**
+  • UNIQUE (provider_id, store_id): un acuerdo vigente por par.
+  • idx (provider_id, status): catálogo del proveedor.
+  • idx (store_id): consulta inversa por tienda.
+  • ACTIVE = visible; INACTIVE = suspendido (sin borrar historial).
+
+  **Distancia:** no se persiste. Se filtra con PostGIS:
+  ST_DWithin(stores.location::geography, origen::geography, radio_m)
+  usando idx_stores_location_geography.
 end note
 
 @enduml

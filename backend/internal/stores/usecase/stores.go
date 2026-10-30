@@ -119,9 +119,10 @@ func (uc *StoresUseCase) List(ctx context.Context, p authz.Principal, in ListInp
 	}
 
 	stores, total, err := uc.stores.List(ctx, domain.ListFilter{
-		Name:   in.Name,
-		Limit:  in.Limit,
-		Offset: in.Offset,
+		ProviderID: p.ProviderID,
+		Name:       in.Name,
+		Limit:      in.Limit,
+		Offset:     in.Offset,
 	})
 	if err != nil {
 		uc.log.Error("List: error consultando tiendas",

@@ -24,13 +24,14 @@ import (
 
 // Resultado del seed para informar al operador.
 type Result struct {
-	Skipped  bool
-	Users    int
-	Stores   int
-	Vehicles int
-	Drivers  int
-	Orders   int
-	Points   int
+	Skipped    bool
+	Users      int
+	Stores     int
+	Vehicles   int
+	Drivers    int
+	Orders     int
+	Points     int
+	Agreements int
 }
 
 // credentials son las credenciales seed (solo desarrollo; ver README).
@@ -64,15 +65,22 @@ func Run(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*Result, er
 		return nil, fmt.Errorf("seed: verificando datos previos: %w", err)
 	}
 	if exists {
-		// El seed base ya corrió, pero la demo de telemetría (F3) puede faltar
-		// en bases creadas antes de esta fase: se completa sin tocar nada más.
+		// El seed base ya corrió, pero los datos derivados (telemetría F3 y
+		// alianzas de la migración 0008) pueden faltar en bases creadas antes:
+		// se completan sin tocar el resto.
 		points, err := seedTelemetry(ctx, pool, log)
+		if err != nil {
+			return nil, err
+		}
+		agreements, err := seedProviderStoreAgreements(ctx, pool, log)
 		if err != nil {
 			return nil, err
 		}
 		res.Skipped = true
 		res.Points = points
-		log.Info("seed: datos ya presentes, telemetría demo verificada", "points", points)
+		res.Agreements = agreements
+		log.Info("seed: datos ya presentes, datos derivados verificados",
+			"points", points, "agreements", agreements)
 		return res, nil
 	}
 
@@ -226,10 +234,19 @@ func Run(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*Result, er
 	}
 	res.Points = points
 
+	// Alianzas demo (migración 0008): el proveedor puede atender las tiendas seed.
+	// Se siembran tras el commit para cubrir también bases ya existentes.
+	agreements, err := seedProviderStoreAgreements(ctx, pool, log)
+	if err != nil {
+		return nil, err
+	}
+	res.Agreements = agreements
+
 	log.Info("seed completado",
 		"users", res.Users, "stores", res.Stores,
 		"vehicles", res.Vehicles, "drivers", res.Drivers,
-		"orders", res.Orders, "points", res.Points)
+		"orders", res.Orders, "points", res.Points,
+		"agreements", res.Agreements)
 	return res, nil
 }
 
@@ -365,6 +382,33 @@ func seedTelemetry(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (i
 
 	log.Info("seed: telemetría demo lista",
 		"inserted_points", total, "points_per_vehicle", demoTrajectoryPoints)
+	return total, nil
+}
+
+// seedProviderStoreAgreements crea las alianzas ACTIVE entre el proveedor seed
+// y cada tienda seed. Es idempotente: ON CONFLICT (provider_id, store_id) DO
+// NOTHING, de modo que ejecutar `make seed` de nuevo no duplica ni reactiva
+// acuerdos suspendidos manualmente.
+func seedProviderStoreAgreements(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (int, error) {
+	total := 0
+	for _, acc := range storeAccs {
+		tag, err := pool.Exec(ctx, `
+			INSERT INTO app.provider_store_agreements (provider_id, store_id, status)
+			SELECT p.id, s.id, 'ACTIVE'::app.provider_store_status
+			FROM app.users p
+			JOIN app.users owner ON owner.email = $2
+			JOIN app.stores s ON s.owner_user_id = owner.id
+			WHERE p.email = $1 AND p.role = 'PROVIDER'
+			ON CONFLICT (provider_id, store_id) DO NOTHING`,
+			providerAcc.Email, acc.Email)
+		if err != nil {
+			return total, fmt.Errorf("seed acuerdos: tienda %s: %w", acc.Email, err)
+		}
+		total += int(tag.RowsAffected())
+	}
+
+	log.Info("seed: alianzas proveedor-tienda listas",
+		"inserted_agreements", total, "stores", len(storeAccs))
 	return total, nil
 }
 

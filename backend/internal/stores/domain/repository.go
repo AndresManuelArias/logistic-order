@@ -4,6 +4,9 @@ import "context"
 
 // ListFilter acota la consulta de tiendas.
 type ListFilter struct {
+	// ProviderID restringe la consulta a las tiendas con acuerdo activo con
+	// ese proveedor (JOIN con app.provider_store_agreements).
+	ProviderID string
 	// Name filtra por nombre (búsqueda parcial, case-insensitive). Vacío = sin filtro.
 	Name   string
 	Limit  int

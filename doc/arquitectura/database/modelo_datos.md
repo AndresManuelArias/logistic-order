@@ -1,8 +1,8 @@
 # Base de Datos Relacional — Tiendas-Track (PostgreSQL + PostGIS + TimescaleDB)
 
-- **Versión:** 1.0
-- **Fecha:** 2026-10-27
-- **Estado:** Propuesta pendiente de aprobación
+- **Versión:** 1.1
+- **Fecha:** 2026-10-29
+- **Estado:** Actualizado con alianzas proveedor ↔ tienda (migración 0008)
 - **Diagrama fuente:** `modelo_datos.puml` · **Render:** `modelo_datos.png`
 
 ![Modelo de Datos](modelo_datos.png)
@@ -50,6 +50,9 @@ CREATE INDEX idx_orders_destination ON orders USING GIST (destination);
 CREATE INDEX idx_orders_origin      ON orders USING GIST (origin);
 CREATE INDEX idx_stores_location    ON stores  USING GIST (location);
 CREATE INDEX idx_points_location    ON telemetry.points USING GIST (location);
+
+-- Radio en metros con ST_DWithin(...::geography) usando índice GiST.
+CREATE INDEX idx_stores_location_geography ON stores USING GIST ((location::geography));
 ```
 
 ### 1.3.1 Restricción de unicidad de tienda (migración 0006)
@@ -97,6 +100,7 @@ SELECT id FROM orders WHERE ST_Contains(:zona::geography::geometry, destination)
 |---|---|---|
 | `users` | PK `id` | Un usuario con rol `PROVIDER`, `STORE` o `DRIVER`. |
 | `stores` | PK `id`, FK `owner_user_id → users` | Una tienda es poseída por un usuario (rol STORE). |
+| `provider_store_agreements` | PK `id`, FK `provider_id → users`, FK `store_id → stores`, `UNIQUE (provider_id, store_id)` | Alianza comercial proveedor ↔ tienda: define qué tiendas puede atender cada proveedor. |
 | `vehicles` | PK `id`, FK `provider_id → users` | Vehículo de la flota de un proveedor. |
 | `drivers` | PK `id`, FK `user_id → users`, FK `vehicle_id → vehicles` | Conductor vinculado a un vehículo. |
 | `orders` | PK `id`, FK `store_id`, `assigned_vehicle_id?`, `assigned_driver_id?`, `customer_id?` | Orden con `origin` y **`destination` (PostGIS)**. |
@@ -128,6 +132,41 @@ SELECT id FROM orders WHERE ST_Contains(:zona::geography::geometry, destination)
 - `CHECK (origin IS NOT NULL AND destination IS NOT NULL)`.
 - `ST_IsValid(destination) = true` (trigger o `CHECK` con función).
 - Transiciones de `status` validadas en la capa de dominio (RF-05).
+
+### 2.3 Alianzas proveedor ↔ tienda (migración `0008`)
+
+Un proveedor no debe ver ni operar con todas las tiendas de la plataforma: solo con aquellas con las que tiene un **acuerdo comercial vigente**. La relación es muchos-a-muchos y se modela en `app.provider_store_agreements`:
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `id` | UUID PK | Identificador del acuerdo. |
+| `provider_id` | UUID FK → `users` | Usuario con rol `PROVIDER`. |
+| `store_id` | UUID FK → `stores` | Tienda aliada. |
+| `status` | `provider_store_status` | `ACTIVE` (visible/operable) o `INACTIVE` (suspendido). |
+| `created_at` / `updated_at` | TIMESTAMPTZ | Alta y último cambio de estado. |
+
+**Reglas de integridad:**
+- `UNIQUE (provider_id, store_id)`: un solo acuerdo por par; suspenderlo es cambiar `status`, no duplicar filas.
+- `ON DELETE CASCADE` en ambas FKs: al eliminar el usuario proveedor o la tienda, el acuerdo deja de existir.
+- El rol `PROVIDER` no se puede imponer con un `CHECK` (requiere consultar `app.users`); deberá validarse en el caso de uso que cree el acuerdo.
+- No se guarda historial de acuerdos: `status` y `updated_at` representan el estado vigente.
+- El seed demo crea acuerdos `ACTIVE` entre el proveedor `proveedor@tiendas.dev` y las dos tiendas demo; es idempotente.
+
+**Distancia (no persistida):** la lejanía se evalúa en la consulta combinando el acuerdo con `stores.location`; no se duplica en la tabla porque depende del punto de referencia (bodega, origen de ruta o ubicación consultada). Con el índice `idx_stores_location_geography`:
+
+```sql
+-- Tiendas aliadas y activas dentro de 10 km de un punto de referencia
+SELECT s.id, s.name, s.address, s.location,
+       ST_DistanceSphere(s.location, :origen) AS distancia_m
+FROM app.provider_store_agreements a
+JOIN app.stores s ON s.id = a.store_id
+WHERE a.provider_id = :provider_id
+  AND a.status = 'ACTIVE'
+  AND ST_DWithin(s.location::geography, :origen::geography, 10000)
+ORDER BY distancia_m;
+```
+
+> **Pendiente de decisión:** el punto de referencia para “muy lejos”. Hoy no existe una ubicación de bodega/centro de cobertura del proveedor; la consulta debe recibir un origen (por ejemplo, el origen de la ruta) o añadirse un perfil geográfico del proveedor. Ver §6.
 
 ---
 
@@ -233,6 +272,7 @@ El arranque está orquestado por Docker Compose (F1 del plan de desarrollo).
 | RF-08/09 (offline + bulk sync) | `sync_receipts.idempotency_key` |
 | RF-10 (agente IA) | `telemetry.stops` + `ai_query_log` |
 | **Destino de la orden (PostGIS)** | **`orders.destination` + índices GiST** |
+| Catálogo de tiendas por proveedor | `provider_store_agreements` (acuerdo) + `stores.location` (distancia) |
 
 ---
 
@@ -242,3 +282,4 @@ El arranque está orquestado por Docker Compose (F1 del plan de desarrollo).
 2. **Formato de entrada:** ¿el cliente envía `lat/lon` o dirección? Se recomienda aceptar ambas y persistir siempre la geometría.
 3. **SRID de trabajo:** se asume WGS84 (4326). Si los datos del proveedor vienen en otro SRID, convertir con `ST_Transform` en la frontera de entrada.
 4. **Umbrales de detección de paradas:** radio (propuesto 30 m), duración mínima (RF-10 sugiere 20 min) y corte por hueco de señal (propuesto 5 min) deben quedar como parámetros configurables, no fijados en código.
+5. **Punto de referencia para la distancia proveedor-tienda:** ¿se usa una bodega/centro de cobertura del proveedor, el origen de cada ruta o un punto enviado por el cliente? Sin esa decisión, el filtro de “tiendas muy lejos” no puede aplicarse de forma automática; la tabla de alianzas solo resuelve el acuerdo comercial.

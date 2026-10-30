@@ -3,9 +3,9 @@
 > **Documento maestro para agentes de IA.**
 > Cualquier agente que vaya a implementar, revisar o probar una parte del sistema **debe leer este documento completo antes de empezar** y respetar las decisiones aquí registradas. Si encuentra una contradicción con otro documento, este plan prevalece y debe escalarse al rol `architect`.
 
-- **Versión:** 1.2
+- **Versión:** 1.3
 - **Fecha:** 2026-10-29
-- **Estado:** F1–F6 completadas y validadas localmente (2026-10-29); los límites de entorno (AWS, macOS, `AI_API_KEY`, remoto Git) se detallan en §7 (F6) y §10
+- **Estado:** F1–F6 completadas y validadas localmente (2026-10-29); se añade el modelo de alianzas proveedor-tienda (migración `0008`). Límites de entorno en §7 (F6) y §10
 - **Fuentes:** `doc/requeriment/*`, `doc/arquitectura/*` (monolito modular, microservicios, UML casos de uso, estructuras de carpetas)
 
 ---
@@ -199,6 +199,7 @@ mobile/src/
 |---|---|---|
 | `users` | id, email, password_hash, role (`PROVIDER`\|`STORE`\|`DRIVER`), status, created_at | RF-01 |
 | `stores` | id, name, owner_user_id, address, **location geometry(Point,4326)** | tienda de barrio (PostGIS) |
+| `provider_store_agreements` | id, provider_id, store_id, status (`ACTIVE`\|`INACTIVE`), created_at, updated_at, UNIQUE(provider_id, store_id) | alianza comercial proveedor ↔ tienda; define qué tiendas puede atender un proveedor (migración `0008`) |
 | `vehicles` | id, plate, provider_id, status, **last_known_location geometry(Point,4326)** | flota B2B (PostGIS) |
 | `drivers` | id, user_id, vehicle_id | conductor vinculado |
 | `orders` | id, external_ref, store_id, customer_id?, status (`CREATED`\|`IN_TRANSIT`\|`DELIVERED`\|`CANCELLED`), assigned_vehicle_id, assigned_driver_id, **origin geometry(Point,4326)**, **destination geometry(Point,4326)**, destination_address, distance_meters, placed_at, picked_up_at, delivered_at, created_at | RF-05, RF-06 · **PostGIS: `destination` es el punto de llega de la orden** |
@@ -240,7 +241,7 @@ mobile/src/
 **Tiendas**
 - `POST /api/v1/stores` (rol STORE) → alta de tienda en un paso propio del registro (409 si ya existe una)
 - `GET /api/v1/stores/me` (rol STORE) → tienda del usuario (404 si el alta sigue pendiente)
-- `GET /api/v1/stores` (rol PROVIDER) → listado paginado de tiendas con filtro `name` (`limit` 1–200, `offset` ≥ 0). La implementación restringe el acceso a PROVIDER; la descripción del spec aún dice «cualquier usuario autenticado» y debe alinearse (R2)
+- `GET /api/v1/stores` (rol PROVIDER) → listado paginado de tiendas con filtro `name` (`limit` 1–200, `offset` ≥ 0). La implementación restringe el acceso a PROVIDER; la descripción del spec aún dice «cualquier usuario autenticado» y debe alinearse (R2). **Pendiente:** aplicar el filtro de alianzas (`provider_store_agreements`, migración `0008`) y el radio de distancia; hoy devuelve todas las tiendas (R18)
 
 **Órdenes**
 - `POST /api/v1/orders` (idempotency; payload con `origin {lat,lon}` y **`destination {lat,lon}`** o dirección geocodificada) · `GET /api/v1/orders` (filtros: status, store, vehicle, rango de fechas, **radio en metros alrededor de un punto**) · `GET /api/v1/orders/{id}`
@@ -272,7 +273,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | Fase | Estado | Evidencia |
 |---|---|---|
 | **F1** | ✅ **Completada (2026-10-28)** | `docker compose up` OK; `/healthz` y `/readyz` 200; 4 migraciones aplicadas; hypertable + continuous aggregate + retención verificadas |
-| **F2** | ✅ **Completada (2026-10-28)** | Módulos `auth`, `orders` y `stores` + migraciones `0005_auth` y `0006_store_owner_unique`; JWT HS256 con refresh rotativo (hash SHA-256); RBAC de rol y de datos server-side (scope vacío = 403); máquina de estados con `order_events` transaccional; alta de tienda en paso propio del registro (`POST /api/v1/stores`, `GET /api/v1/stores/me`; `store` opcional en register — R11 resuelto) y listado paginado para el proveedor (`GET /api/v1/stores`, rol PROVIDER, filtro `name` y `limit`/`offset`); spec OpenAPI 3.1 embebida (`/swagger/index.html`, `/api/v1/openapi.json|yaml`); seed (1 proveedor, 2 tiendas, 3 conductores, 3 vehículos, 10 órdenes georreferenciadas); `go test -race ./...` OK y e2e `scripts/e2e_f2.sh` 72/72 casos OK |
+| **F2** | ✅ **Completada (2026-10-28)** | Módulos `auth`, `orders` y `stores` + migraciones `0005_auth` y `0006_store_owner_unique`; JWT HS256 con refresh rotativo (hash SHA-256); RBAC de rol y de datos server-side (scope vacío = 403); máquina de estados con `order_events` transaccional; alta de tienda en paso propio del registro (`POST /api/v1/stores`, `GET /api/v1/stores/me`; `store` opcional en register — R11 resuelto) y listado paginado para el proveedor (`GET /api/v1/stores`, rol PROVIDER, filtro `name` y `limit`/`offset`); spec OpenAPI 3.1 embebida (`/swagger/index.html`, `/api/v1/openapi.json|yaml`); seed (1 proveedor, 2 tiendas, 3 conductores, 3 vehículos, 10 órdenes georreferenciadas y 2 alianzas proveedor-tienda); `go test -race ./...` OK y e2e `scripts/e2e_f2.sh` 72/72 casos OK |
 | F3 | ✅ **Completada (2026-10-28)** | Módulo `telemetry` (ingesta individual y bulk idempotente por `Idempotency-Key` + `sync_receipts`, `latest`/`track` con RBAC y circuit breaker); bus interno `shared/eventbus` (Go channels, descarte contabilizado); hub `shared/websocket` con suscripciones validadas, revalidación de concesiones (`WS_GRANT_TTL`), cierre por expiración de token (`4401`) y por consumidor lento (`1008`); `POST /telemetry/points|bulk`, `GET /vehicles/{id}/latest|track` y `GET /ws` documentados en OpenAPI; seed con 90 puntos demo (30 por vehículo, validado con `curl` sobre `track`); `go test -race ./...` OK (16 paquetes) y e2e `scripts/e2e_f3.sh` 63/63 casos OK con latencia WS de **4,3 ms** (RNF-04 < 500 ms) |
 | F4 | ✅ **Completada (2026-10-28)** | Monorepo `web/` con `@tiendas/tracking-core` (cliente OpenAPI, refresh single-flight, `useTracking` con backoff/dedupe) y `@tiendas/tracking-ui` (mapa SVG accesible, tarjeta de orden, progreso); portal Next.js 16 con login, `/proveedor`, `/tienda` (dual), `/conductor` y `/seguimiento/{id}#t=…`; BFF same-origin con refresh en cookie `httpOnly`; `GET /api/v1/vehicles` para los paneles; 58 pruebas, typecheck/lint/build OK. App móvil Expo SDK 54 + RN 0.81 + WatermelonDB con GPS en segundo plano, cola write-ahead idempotente (`Idempotency-Key`), transiciones reconciliadas por `GET`, POD local y UI de conductor; 99 pruebas, typecheck y bundle Metro OK; idempotencia validada contra el backend real. Compilación nativa, GPS y permisos reales no validados por falta de emulador/Android SDK |
 | F5 | ✅ **Completada (2026-10-29)** | Módulo `aiagent` (`domain`/`usecase`/`infrastructure`/`delivery`) con catálogo cerrado de 4 herramientas y SQL scopeado por rol; adaptador LLM HTTP compatible con OpenAI (sin SDK, sirve OpenAI/Groq/Ollama/vLLM); `POST /api/v1/ai/query` con validación, bucle de tool-calling acotado (`AI_MAX_STEPS`), timeout global y circuit breaker dedicado (`ai-llm`); auditoría ampliada en `app.ai_query_log` (migración `0007`: estado, error, respuesta, modelo y `tools JSONB`); sin `AI_API_KEY` → `503 AI_NOT_CONFIGURED`; contrato OpenAPI + panel del portal integrados; `go test ./...` OK (incluye orquestador, herramientas, adaptador LLM, handler, config y contrato) y 58 pruebas web OK. Prueba con proveedor real pendiente: no hay API key en el entorno |
@@ -302,7 +303,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
   2. Middleware RBAC + `RequireRole` + filtrado de datos por rol en repositorios.
   3. Módulo `orders`: CRUD, máquina de estados, `order_events`, asignación de flota (RF-06).
   4. Token de invitado para Cliente Final, con expiración y scope `order:<id>`.
-  5. Seed de datos demo (1 proveedor, 2 tiendas con `location`, 3 conductores, 10 órdenes **con `origin` y `destination` georreferenciadas**).
+  5. Seed de datos demo (1 proveedor, 2 tiendas con `location`, 3 conductores, 10 órdenes **con `origin` y `destination` georreferenciadas** y 2 acuerdos `ACTIVE` en `provider_store_agreements`).
   6. **Swagger/OpenAPI:** especificación `backend/api/openapi.yaml` (OpenAPI 3.1) con todos los endpoints de F2, servida como Swagger UI en `/swagger/index.html` y spec JSON en `/api/v1/openapi.json`.
   7. **Alta de tienda en paso propio (R11):** módulo `stores` con `POST /api/v1/stores`, `GET /api/v1/stores/me` y `GET /api/v1/stores` (listado paginado con filtro `name`, rol PROVIDER); `store` pasa a opcional en el registro y "una tienda por dueño" se protege con índice único (migración `0006`).
 - **Criterio de aceptación:** un usuario de un rol **nunca** puede leer recursos de otro rol (probado); transiciones inválidas → 409.
@@ -509,6 +510,7 @@ Códigos: `401 UNAUTHENTICATED` · `403 FORBIDDEN_SCOPE` · `404 NOT_FOUND` · `
 | R15 | RDS no soporta TimescaleDB | **Limitación de IaC** | El Terraform de F6 es un despliegue de referencia; para telemetría usar Timescale Cloud o PostgreSQL autogestionado con `timescale/timescaledb-ha` (ver `infra/README.md`) |
 | R16 | `npm audit` móvil con 15 vulnerabilidades transitivas | **Abierto (upstream)** | `postcss` dentro de Expo SDK 54; el fix automático propone `expo@51` (breaking). El job `security` lo reporta sin bloquear |
 | R17 | Build nativo iOS y firma móvil no validados | **Limitación de entorno** | No hay macOS/Xcode; Fastlane en Linux solo ejecuta `test`/`build`/`ci` (bundle JS). La lane `ios` falla explícitamente fuera de macOS |
+| R18 | `GET /api/v1/stores` aún no filtra por alianza ni distancia | **Abierto (modelo listo)** | Existe `provider_store_agreements` (0008) con estado y unicidad por par, pero el endpoint devuelve todas las tiendas. Falta decidir el punto de referencia de distancia (bodega del proveedor, origen de ruta o punto de consulta) e integrar el `JOIN` + `ST_DWithin` |
 
 ---
 
