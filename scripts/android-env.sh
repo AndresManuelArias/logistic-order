@@ -52,8 +52,12 @@ export PATH="$SDK/platform-tools:$SDK/cmdline-tools/latest/bin:$SDK/emulator:$PA
 # Fuera de $HOME, Gradle y los AVD también deben salir de $HOME (disco pequeño).
 if [ -n "${ANDROID_TOOLCHAINS:-}" ]; then
   export ANDROID_USER_HOME="${ANDROID_USER_HOME:-$ANDROID_TOOLCHAINS/android-home}"
+  # El emulador busca los AVD en $ANDROID_AVD_HOME, $ANDROID_SDK_HOME/avd y
+  # $HOME/.android/avd (en ese orden): sin esta variable no encuentra los AVD
+  # creados bajo $ANDROID_USER_HOME.
+  export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-$ANDROID_USER_HOME/avd}"
   export GRADLE_USER_HOME="${GRADLE_USER_HOME:-$ANDROID_TOOLCHAINS/gradle}"
-  mkdir -p "$ANDROID_USER_HOME" "$GRADLE_USER_HOME"
+  mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME" "$GRADLE_USER_HOME"
 fi
 
 # React Native 0.81 / Gradle 8.14 se validan con JDK 17.
@@ -64,6 +68,7 @@ fi
 
 echo "ANDROID_HOME=$ANDROID_HOME"
 echo "ANDROID_USER_HOME=${ANDROID_USER_HOME:-$HOME/.android}"
+echo "ANDROID_AVD_HOME=${ANDROID_AVD_HOME:-$HOME/.android/avd}"
 echo "GRADLE_USER_HOME=${GRADLE_USER_HOME:-$HOME/.gradle}"
 echo "JAVA_HOME=${JAVA_HOME:-<system java>}"
 command -v adb >/dev/null && echo "adb=$(command -v adb)"

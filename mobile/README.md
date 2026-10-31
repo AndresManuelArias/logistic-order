@@ -73,6 +73,247 @@ cd mobile && npm run android
     `hw.device.name=pixel_7`, RAM/CPU/densidad).
   - Comprobar con `emulator -list-avds`; `avdmanager list avd` puede seguir
     fallando sin impedir el arranque.
+  - `scripts/android-env.sh` exporta `ANDROID_AVD_HOME` (por defecto
+    `$ANDROID_USER_HOME/avd`). Sin esa variable el emulador responde
+    `Unknown AVD name [tiendas36]`, porque sólo busca en
+    `$ANDROID_AVD_HOME`, `$ANDROID_SDK_HOME/avd` y `$HOME/.android/avd`.
+
+### Arrancar el emulador y la app
+
+#### Cómo funciona el arranque
+
+```text
+┌────────────────┐   :8080    ┌────────────────────────┐
+│ backend Go     │◄───────────│  emulador Android 36   │
+│ + PostgreSQL   │  10.0.2.2  │  dev.tiendas.track...  │
+└────────────────┘            └───────────┬────────────┘
+                                          │ adb reverse tcp:8081
+                              ┌───────────▼────────────┐
+                              │  Metro :8081 (JS/TS)   │
+                              └────────────────────────┘
+```
+
+- La app es un **dev client nativo** (`dev.tiendas.track.driver`), no Expo Go.
+  El código nativo vive en `android/`; el **JavaScript se sirve desde Metro** en
+  cada arranque, por eso los cambios se ven con Fast Refresh sin recompilar.
+- `adb reverse tcp:8081 tcp:8081` hace que `localhost:8081` **dentro** del
+  emulador apunte al puerto `8081` del host. Sin esto el dev client no encuentra
+  el bundle (`Unable to load script`).
+- El **deep link** `tiendastrack://expo-development-client/?url=...` le indica al
+  dev client qué Metro debe cargar; sin él se queda en la pantalla del launcher.
+- El **backend no usa `adb reverse`**: el emulador sale por `10.0.2.2`, que el
+  emulador traduce al loopback del host. Por eso `mobile/.env` tiene
+  `EXPO_PUBLIC_API_URL=http://10.0.2.2:8080`.
+- Las variables `EXPO_PUBLIC_*` se incrustan en el bundle al arrancar Metro: si
+  cambias la URL, reinicia con `--clear`.
+
+#### Camino corto (un comando)
+
+```bash
+bash scripts/start-emulator.sh
+```
+
+Hace todo lo de los pasos 1 a 7 y termina abriendo la app. Se puede lanzar desde
+cualquier directorio y en una terminal sin nada configurado: el script resuelve
+el SDK por sí mismo. Opciones:
+
+| Comando | Para qué |
+|---|---|
+| `scripts/start-emulator.sh` | emulador + Metro + app |
+| `scripts/start-emulator.sh --avd pixel` | otro AVD (`AVD=...` también vale) |
+| `scripts/start-emulator.sh --sdk /media/datos/toolchains` | SDK fuera de `$HOME` si la autodetección falla |
+| `scripts/start-emulator.sh --no-metro` | ya tienes Metro corriendo |
+| `scripts/start-emulator.sh --port 8082` | otro puerto para Metro |
+| `HEADLESS=1 scripts/start-emulator.sh` | sin ventana (SSH/sin pantalla); la ves con `adb exec-out screencap` |
+
+Qué hace en orden: busca y exporta el entorno Android → arranca el emulador y
+espera el `sys.boot_completed` real → desactiva los diálogos de ANR del sistema
+y reinicia System UI si ya había uno → comprueba que la app está instalada
+(instala el APK si existe) → arranca o reutiliza Metro → `adb reverse` + deep
+link → concede permisos → inyecta una posición GPS → resume el estado.
+
+Si algo falla, traduce el error a la causa (`emulator: command not found`,
+`Unknown AVD name`, falta `XAUTHORITY`, sin `/dev/kvm`, puerto ocupado…).
+
+Los pasos siguientes explican **qué hace cada pieza**; úsalos cuando quieras
+control manual o para entender el porqué.
+
+#### Paso 1 — Entorno Android
+
+```bash
+# Desde la raíz del repo. En cada terminal que use adb, emulator o gradle.
+export ANDROID_TOOLCHAINS=/ruta/con/espacio/toolchains   # sólo si el SDK no está en $HOME
+source scripts/android-env.sh
+```
+
+Exporta `ANDROID_HOME`, añade `platform-tools`/`emulator` al `PATH`, fija
+`ANDROID_USER_HOME`, `ANDROID_AVD_HOME` (para que el emulador encuentre el AVD),
+`GRADLE_USER_HOME` y JDK 17. Al final imprime las rutas: verifica que
+`ANDROID_AVD_HOME` apunta a donde está `tiendas36.ini`.
+
+#### Paso 2 — Backend y base de datos
+
+```bash
+make run-local        # PostgreSQL en Docker + go run ./cmd/server
+curl -s http://localhost:8080/healthz   # debe responder 200 OK
+```
+
+Sin backend la app arranca igual y opera con la cola local, pero el login y la
+sincronización fallan. Alternativa: `make db-up` sólo para la base.
+
+#### Paso 3 — Emulador
+
+```bash
+emulator -avd tiendas36 -no-snapshot -no-audio -no-boot-anim \
+         -gpu swiftshader_indirect &
+
+adb wait-for-device
+adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
+adb devices        # emulator-5554   device
+```
+
+- `-no-snapshot`: arranque limpio (no reanuda una instantánea guardada).
+- `-no-audio` / `-no-boot-anim`: menos carga en máquinas sin GPU dedicada.
+- `-gpu swiftshader_indirect`: renderizado por software; si tienes GPU, usa
+  `-gpu host` (más fluido).
+- El bucle de `sys.boot_completed` es la espera real: `adb wait-for-device`
+  vuelve antes, cuando el dispositivo aún está arrancando Android.
+- El primer arranque tarda ~90 s; los siguientes son más rápidos.
+
+#### Paso 4 — Metro (servidor de JavaScript)
+
+```bash
+cd mobile
+npx expo start --dev-client --port 8081
+```
+
+`--dev-client` evita el modo Expo Go; `--port 8081` debe coincidir con el
+`adb reverse` del paso 6. Deja esta terminal abierta: aquí aparecen los logs de
+JS (`[tiendas:...]`) y los errores de bundling.
+
+#### Paso 5 — Compilar e instalar la app (sólo si no está instalada)
+
+```bash
+cd mobile
+npm run android        # expo run:android: Gradle + instalación + Metro
+```
+
+- Compila el proyecto nativo, instala el APK y **por defecto levanta su propio
+  Metro**. Si ya tienes Metro del paso 4, ejecuta
+  `npx expo run:android --no-bundler` para no abrir un segundo bundler.
+- El APK queda en `android/app/build/outputs/apk/debug/app-debug.apk`. Para
+  reinstalar uno ya compilado sin Gradle:
+  ```bash
+  adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+  ```
+- La primera compilación descarga Gradle, NDK y dependencias: puede tardar
+  **más de una hora**. Las siguientes son incrementales.
+
+#### Paso 6 — Abrir la app contra Metro
+
+```bash
+adb reverse tcp:8081 tcp:8081
+
+adb shell am start -a android.intent.action.VIEW \
+  -d "tiendastrack://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"
+```
+
+El `reverse` conecta el `8081` del emulador con el del host y el deep link carga
+el bundle. La primera vez Metro tarda ~30 s en compilar (`Bundled ... index.ts`);
+después los cambios se aplican en caliente.
+
+#### Paso 7 — Permisos (GPS en segundo plano y notificaciones)
+
+```bash
+PKG=dev.tiendas.track.driver
+adb shell pm grant $PKG android.permission.ACCESS_FINE_LOCATION
+adb shell pm grant $PKG android.permission.ACCESS_COARSE_LOCATION
+adb shell pm grant $PKG android.permission.ACCESS_BACKGROUND_LOCATION
+adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS
+```
+
+Evita los diálogos del sistema. El permiso «Permitir siempre» es el que habilita
+la tarea de ubicación en segundo plano; el de notificaciones es para el aviso
+persistente del foreground service.
+
+#### Paso 8 — Verificar y operar
+
+```bash
+# ¿Está instalada?
+adb shell pm list packages | grep tiendas
+
+# Logs de la app (logger propio con prefijo [tiendas:])
+adb logcat -s ReactNativeJS:V | grep -i tiendas
+
+# Inyectar una posición GPS: longitud latitud [altitud satélites velocidad]
+adb emu geo fix -74.0612 4.6480 2600 8 5
+
+# Confirmar que la app pide GPS real (HIGH_ACCURACY) y no sólo red
+adb shell dumpsys activity service \
+  com.google.android.gms/com.google.android.location.internal.GoogleLocationManagerService \
+  | grep -E "tiendas|HIGH_ACCURACY|GpsBatch"
+
+# Captura de pantalla y apagado
+adb exec-out screencap -p > /tmp/app.png
+adb -s emulator-5554 emu kill
+```
+
+#### Todo junto (copiar y pegar)
+
+Con el backend ya corriendo (`make run-local`), en una terminal desde la raíz.
+Asume que nada está escuchando en `8081`:
+
+```bash
+export ANDROID_TOOLCHAINS=/ruta/con/espacio/toolchains
+source scripts/android-env.sh
+
+# emulador (log en /tmp/emulator.log)
+emulator -avd tiendas36 -no-snapshot -no-audio -no-boot-anim \
+         -gpu swiftshader_indirect > /tmp/emulator.log 2>&1 &
+adb wait-for-device
+adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
+
+# Metro en segundo plano (logs en /tmp/metro.log)
+cd mobile
+npx expo start --dev-client --port 8081 > /tmp/metro.log 2>&1 &
+until curl -sf http://localhost:8081/status >/dev/null; do sleep 2; done
+echo "Metro listo"
+
+# app (si el APK no existe, ejecuta antes: npm run android)
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk 2>/dev/null || true
+adb reverse tcp:8081 tcp:8081
+adb shell am start -a android.intent.action.VIEW \
+  -d "tiendastrack://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"
+
+# permisos y una posición inicial
+PKG=dev.tiendas.track.driver
+for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION ACCESS_BACKGROUND_LOCATION POST_NOTIFICATIONS; do
+  adb shell pm grant $PKG android.permission.$p
+done
+adb emu geo fix -74.0612 4.6480 2600 8 5
+
+# seguimiento
+tail -f /tmp/metro.log
+```
+
+Qué esperar al terminar:
+
+```text
+Adb shell: 1                    → Android arrancado
+Metro listo                     → bundle disponible en :8081
+Starting: Intent { ... }        → dev client abierto
+```
+
+- La primera vez Metro tarda ~30 s en `Bundled ... index.ts`; luego la app
+  muestra el login (`Servidor: http://10.0.2.2:8080`).
+- El **GPS no se activa solo**: pulsa «Activar seguimiento» en la tarjeta. Es una
+  decisión del conductor y la app no la toma por él.
+- En máquinas sin GPU puede aparecer «System UI isn't responding» durante el
+  arranque o el primer bundle; elige **Wait** (es el emulador, no la app).
+- Si Metro ya estaba corriendo en `8081`, el segundo `expo start` no arranca pero
+  el bucle `until curl` sí pasa: el bloque reutiliza el Metro existente. Si ese
+  Metro tiene caché vieja (`UnableToResolveError`), ciérralo y repite el bloque,
+  o arráncalo a mano con `--clear`.
 
 ### URL del backend
 
@@ -380,6 +621,13 @@ permisos reales, cámara, ciclo de vida en segundo plano y consumo de batería.
 | No aparece el permiso «Siempre» | iOS exige conceder primero «Al usar la app» y luego volver a solicitar | Ajustes → Ubicación → Siempre |
 | El GPS no avanza en Expo Go | Limitación de Expo Go | Usar `expo prebuild` + dev client |
 | GPS activo pero 0 puntos | La petición es de red y no de GPS | `adb shell dumpsys activity service com.google.android.gms/com.google.android.location.internal.GoogleLocationManagerService \| grep -E "tiendas\|HIGH_ACCURACY\|GpsBatch"`; debe aparecer `HIGH_ACCURACY` y `GpsBatch[requested=true]` |
+| `emulator: command not found` | El SDK no está en `PATH` (terminal nueva sin el script) | `bash scripts/start-emulator.sh` o `source scripts/android-env.sh` |
+| `SDK de Android no encontrado` | El SDK está fuera de `$HOME` y falta `ANDROID_TOOLCHAINS` | `export ANDROID_TOOLCHAINS=/media/andres-arias/Nuevo_vol31/toolchains` (o `bash scripts/start-emulator.sh`) |
+| `Unknown AVD name [tiendas36]` | Falta `ANDROID_AVD_HOME` o el AVD no está donde el emulador busca | `source scripts/android-env.sh` (ya lo exporta) y `emulator -list-avds` |
+| El emulador abre pero no ves la app / se queda en negro | Diálogo `System UI isn't responding` en primer plano: el ANR del emulador tapa la app | Pulsa **Wait** (o `adb shell am force-stop com.android.systemui`); el script ya lo hace y desactiva `hide_error_dialogs` |
+| `No puede abrir la ventana` / `Authorization required` | Sin `DISPLAY`/`XAUTHORITY` (SSH, sudo, another user) | `export DISPLAY=:0 XAUTHORITY=$XAUTHORITY` o `HEADLESS=1 bash scripts/start-emulator.sh` |
+| El dev client muestra `UnableToResolveError` | Caché de Metro obsoleta tras cambiar `node_modules` | Reiniciar Metro con `npx expo start --dev-client --port 8081 --clear` |
+| `npx: command not found` al arrancar Metro | Node/nvm no activo en esa terminal | `nvm use` o `source ~/.nvm/nvm.sh` antes de lanzar |
 | App no arranca («base local») | SQLite corrupta o migración fallida | Reabrir; si persiste, reinstalar (se pierde la cola local) |
 | Bundle falla tras cambiar `.env` | Metro cachea variables build-time | Reiniciar Metro con `--clear` |
 
