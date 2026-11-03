@@ -35,5 +35,8 @@
   },
   "dependencies": {
     "maplibre-gl": "^6.16.0"
+  },
+  "engines": {
+    "node": ">=22.22.2"
   }
 }

@@ -37,7 +37,8 @@ revalida** el permiso y el alcance.
 
 ## Requisitos
 
-- Node.js 22+ (probado con 24)
+- Node.js 22.22.2+ (probado con 22 y 24). Vitest 5 y jsdom 30 no arrancan
+  en Node 20: el runner falla en `undici` antes de ejecutar una sola prueba.
 - npm 10+ (workspaces)
 - Backend Tiendas-Track en `http://localhost:8080` (`make dev` en la raíz)
 
@@ -163,7 +164,7 @@ en `tracking-core/src/api/client.ts` con la forma del contrato F5
 ```bash
 npm run typecheck   # los 3 workspaces
 npm run lint        # ESLint flat config de Next 16
-npm test            # 58 pruebas (core + UI + hooks y BFF del portal)
+npm test            # 59 pruebas (core + UI + hooks y BFF del portal)
 npm run build       # build de producción (standalone)
 ```
 
