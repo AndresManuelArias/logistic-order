@@ -39,13 +39,13 @@ type Config struct {
 
 	// F5: agente operativo de IA (RF-10, RNF-05). La API key es un secreto:
 	// si falta, el agente queda deshabilitado y responde 503 controlado.
-	AIEnabled   bool
-	AIProvider  string // "openai" (por defecto) | "gemini"
-	AIBaseURL   string
-	AIAPIKey    string
-	AIModel     string
-	AITimeout   time.Duration
-	AIMaxSteps  int
+	AIEnabled  bool
+	AIProvider string // "openai" (por defecto) | "gemini"
+	AIBaseURL  string
+	AIAPIKey   string
+	AIModel    string
+	AITimeout  time.Duration
+	AIMaxSteps int
 
 	// F6: rate limiting (§9.4). Límites por minuto y por clave (IP o usuario).
 	RateLimitEnabled         bool

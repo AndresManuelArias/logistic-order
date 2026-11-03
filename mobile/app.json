@@ -48,7 +48,8 @@
           "cameraPermission": "La cámara se usa para adjuntar la foto de la prueba de entrega."
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "./plugins/with-android-uses-feature"
     ]
   }
 }

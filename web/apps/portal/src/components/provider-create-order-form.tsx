@@ -22,7 +22,10 @@ export function ProviderCreateOrderForm({
   const [destinationLon, setDestinationLon] = useState('-74.0817')
   const [vehicleId, setVehicleId] = useState('')
   const [driverId, setDriverId] = useState('')
-  const [drivers, setDrivers] = useState<Driver[]>([])
+  const [driversResult, setDriversResult] = useState<{ vehicleId: string; items: Driver[] }>({
+    vehicleId: '',
+    items: [],
+  })
   const [stores, setStores] = useState<Store[]>([])
   const [storesLoading, setStoresLoading] = useState(true)
   const [pending, setPending] = useState(false)
@@ -30,7 +33,6 @@ export function ProviderCreateOrderForm({
 
   useEffect(() => {
     let cancelled = false
-    setStoresLoading(true)
     api.listStores({ limit: 200 }).then((page) => {
       if (!cancelled) setStores(page.items)
     }).catch((reason) => {
@@ -42,20 +44,22 @@ export function ProviderCreateOrderForm({
   }, [api])
 
   useEffect(() => {
-    setDriverId('')
-    setDrivers([])
     if (!vehicleId) return
     let cancelled = false
     api.listDrivers(vehicleId).then((page) => {
-      if (!cancelled) {
-        setDrivers(page.items)
-        if (page.items.length === 1) setDriverId(page.items[0]?.id ?? '')
-      }
+      if (cancelled) return
+      setDriversResult({ vehicleId, items: page.items })
+      if (page.items.length === 1) setDriverId(page.items[0]?.id ?? '')
     }).catch((reason) => {
       if (!cancelled) setError(toApiError(reason).message || 'No se pudieron cargar los conductores.')
     })
     return () => { cancelled = true }
   }, [api, vehicleId])
+
+  // Al cambiar de vehículo, la lista anterior deja de aplicar y la selección
+  // de conductor se invalida sin necesidad de resetear estado en el efecto.
+  const drivers = driversResult.vehicleId === vehicleId ? driversResult.items : []
+  const selectedDriverId = drivers.some((driver) => driver.id === driverId) ? driverId : ''
 
   function reset() {
     setExternalRef(''); setStoreId(''); setAddress('')
@@ -82,7 +86,7 @@ export function ProviderCreateOrderForm({
       setError('Las coordenadas de destino no son válidas.')
       return
     }
-    if (!vehicleId || !driverId) {
+    if (!vehicleId || !selectedDriverId) {
       setError('Selecciona un vehículo y un conductor.')
       return
     }
@@ -97,7 +101,7 @@ export function ProviderCreateOrderForm({
         destination: { lat: dlat, lon: dlon },
         destination_address: address.trim() || undefined,
       })
-      await api.assignOrder(order.id, { vehicle_id: vehicleId, driver_id: driverId })
+      await api.assignOrder(order.id, { vehicle_id: vehicleId, driver_id: selectedDriverId })
       reset()
       setOpen(false)
       onCreated()
@@ -141,7 +145,7 @@ export function ProviderCreateOrderForm({
         </div>
         <div className="tt-field-grid">
           <div className="tt-field"><label className="tt-field__label" htmlFor="provider-order-vehicle">Vehículo</label><select id="provider-order-vehicle" className="tt-input" value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} required><option value="">— Selecciona un vehículo —</option>{activeVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.plate}</option>)}</select></div>
-          <div className="tt-field"><label className="tt-field__label" htmlFor="provider-order-driver">Conductor</label><select id="provider-order-driver" className="tt-input" value={driverId} onChange={(e) => setDriverId(e.target.value)} disabled={!vehicleId} required><option value="">— Selecciona un conductor —</option>{drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.full_name}</option>)}</select></div>
+          <div className="tt-field"><label className="tt-field__label" htmlFor="provider-order-driver">Conductor</label><select id="provider-order-driver" className="tt-input" value={selectedDriverId} onChange={(e) => setDriverId(e.target.value)} disabled={!vehicleId} required><option value="">— Selecciona un conductor —</option>{drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.full_name}</option>)}</select></div>
         </div>
         {error ? <p className="tt-form__error" role="alert">{error}</p> : null}
         <div className="tt-form__actions"><button className="tt-button" type="submit" disabled={pending}>{pending ? 'Creando…' : 'Crear y asignar'}</button></div>

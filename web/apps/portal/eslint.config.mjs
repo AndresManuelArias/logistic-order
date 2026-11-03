@@ -7,7 +7,8 @@ export default defineConfig([
   ...nextVitals,
   ...nextTypeScript,
   {
-    ignores: ['.next/**', 'node_modules/**', 'next-env.d.ts', 'next.config.ts'],
+    // public/ guarda bundles vendorizados (worker de MapLibre): no se lintean.
+    ignores: ['.next/**', 'node_modules/**', 'public/**', 'next-env.d.ts', 'next.config.ts'],
   },
   {
     rules: {

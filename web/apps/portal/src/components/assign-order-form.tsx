@@ -23,43 +23,44 @@ export function AssignOrderForm({ order, vehicles, onAssigned, onCancel }: Assig
 
   const [vehicleId, setVehicleId] = useState<string>('')
   const [driverId, setDriverId] = useState<string>('')
-  const [drivers, setDrivers] = useState<Driver[]>([])
-  const [driversLoading, setDriversLoading] = useState(false)
-  const [driversError, setDriversError] = useState<string | null>(null)
+  // Última carga de conductores junto al vehículo al que pertenece. Guardar el
+  // vehículo permite derivar "cargando" y "error" durante el render en lugar de
+  // resetear estado sincrónicamente dentro del efecto
+  // (react-hooks/set-state-in-effect).
+  const [driversResult, setDriversResult] = useState<{
+    vehicleId: string
+    items: Driver[]
+    error: string | null
+  }>({ vehicleId: '', items: [], error: null })
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Al cambiar el vehículo seleccionado, carga sus conductores y limpia el
-  // conductor previamente seleccionado.
+  // Al cambiar el vehículo se cargan sus conductores. La limpieza del conductor
+  // anterior sale de la derivación: si no está en la lista del vehículo actual,
+  // no cuenta como seleccionado.
   useEffect(() => {
-    setDriverId('')
-    setDrivers([])
-    setDriversError(null)
-
     if (!vehicleId) return
 
     let cancelled = false
-    setDriversLoading(true)
 
     api
       .listDrivers(vehicleId)
       .then((page) => {
-        if (!cancelled) {
-          setDrivers(page.items)
-          if (page.items.length === 1) {
-            // Solo hay un conductor: pre-seleccionar.
-            setDriverId(page.items[0]?.id ?? '')
-          }
+        if (cancelled) return
+        setDriversResult({ vehicleId, items: page.items, error: null })
+        if (page.items.length === 1) {
+          // Solo hay un conductor: pre-seleccionar.
+          setDriverId(page.items[0]?.id ?? '')
         }
       })
       .catch((reason) => {
-        if (!cancelled) {
-          const apiError = toApiError(reason)
-          setDriversError(apiError.message || 'No se pudieron cargar los conductores.')
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setDriversLoading(false)
+        if (cancelled) return
+        const apiError = toApiError(reason)
+        setDriversResult({
+          vehicleId,
+          items: [],
+          error: apiError.message || 'No se pudieron cargar los conductores.',
+        })
       })
 
     return () => {
@@ -67,9 +68,16 @@ export function AssignOrderForm({ order, vehicles, onAssigned, onCancel }: Assig
     }
   }, [vehicleId, api])
 
+  const driversLoaded = driversResult.vehicleId === vehicleId
+  const drivers = driversLoaded ? driversResult.items : []
+  const driversLoading = Boolean(vehicleId) && !driversLoaded
+  const driversError = driversLoaded ? driversResult.error : null
+  // El conductor sólo cuenta como seleccionado si pertenece a la lista actual.
+  const selectedDriverId = drivers.some((driver) => driver.id === driverId) ? driverId : ''
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (!vehicleId || !driverId) {
+    if (!vehicleId || !selectedDriverId) {
       setError('Selecciona un vehículo y un conductor.')
       return
     }
@@ -77,7 +85,7 @@ export function AssignOrderForm({ order, vehicles, onAssigned, onCancel }: Assig
     setPending(true)
     setError(null)
     try {
-      await api.assignOrder(order.id, { vehicle_id: vehicleId, driver_id: driverId })
+      await api.assignOrder(order.id, { vehicle_id: vehicleId, driver_id: selectedDriverId })
       onAssigned()
     } catch (reason) {
       const apiError = toApiError(reason)
@@ -163,7 +171,7 @@ export function AssignOrderForm({ order, vehicles, onAssigned, onCancel }: Assig
               <select
                 id={`assign-driver-${order.id}`}
                 className="tt-input"
-                value={driverId}
+                value={selectedDriverId}
                 onChange={(e) => setDriverId(e.target.value)}
                 required
                 aria-required="true"
@@ -190,7 +198,7 @@ export function AssignOrderForm({ order, vehicles, onAssigned, onCancel }: Assig
           <button
             className="tt-button"
             type="submit"
-            disabled={pending || !vehicleId || !driverId || driversLoading}
+            disabled={pending || !vehicleId || !selectedDriverId || driversLoading}
           >
             {pending ? 'Asignando…' : 'Asignar'}
           </button>
