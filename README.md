@@ -662,7 +662,7 @@ Las migraciones se aplican automáticamente al arrancar el backend (`MIGRATE_ON_
 | F1 — Esqueleto + Docker Compose | ✅ Completada (2026-10-28) |
 | F2 — Auth, RBAC y órdenes | ✅ Completada (2026-10-28) |
 | F3 — Telemetría y WebSockets | ✅ Completada (2026-10-28) |
-| F4 — Portal y app móvil | ✅ Implementados (2026-10-28); validación en dispositivo pendiente (sin emulador/SDK) |
+| F4 — Portal y app móvil | ✅ Implementados (2026-10-28); APK validado en emulador Android (2026-11-03) |
 | F5 — Agente IA | ✅ Implementado (2026-10-29); prueba con proveedor real pendiente (sin API key en el entorno) |
 | F6 — Carga, IaC y CI/CD | ✅ Implementado (2026-10-29); `apply` AWS y build nativo móvil pendientes (sin credenciales/macOS) |
 

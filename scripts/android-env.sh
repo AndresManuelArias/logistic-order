@@ -30,9 +30,9 @@ _find_sdk() {
   return 1
 }
 
-_find_jdk17() {
+_find_jdk() {
   local d
-  for d in "$HOME/.sdkman/candidates/java"/17* /usr/lib/jvm/java-17-*; do
+  for d in "$HOME/.sdkman/candidates/java"/{17,21}* /usr/lib/jvm/java-{17,21}-*; do
     [ -x "$d/bin/javac" ] && { printf '%s' "$d"; return 0; }
   done
   return 1
@@ -60,16 +60,34 @@ if [ -n "${ANDROID_TOOLCHAINS:-}" ]; then
   mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME" "$GRADLE_USER_HOME"
 fi
 
-# React Native 0.81 / Gradle 8.14 se validan con JDK 17.
+# React Native 0.81 / Gradle 8.14 aceptan JDK 17 y 21. Prioridad:
+# 1) JAVA_HOME ya definido por el usuario,
+# 2) el `java` del PATH (se deriva su JAVA_HOME),
+# 3) un JDK 17/21 instalado.
+# Así la versión que se imprime es la que realmente usa Gradle.
 if [ -z "${JAVA_HOME:-}" ]; then
-  JDK="$(_find_jdk17 || true)"
-  [ -n "$JDK" ] && export JAVA_HOME="$JDK"
+  if command -v java >/dev/null 2>&1; then
+    JAVA_HOME="$(cd "$(dirname "$(command -v java)")/.." && pwd -P)"
+    export JAVA_HOME
+  else
+    JDK="$(_find_jdk || true)"
+    [ -n "$JDK" ] && export JAVA_HOME="$JDK"
+  fi
+fi
+
+# El `java` del PATH debe ser el de JAVA_HOME, no el primero que aparezca.
+if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  export PATH="$JAVA_HOME/bin:$PATH"
 fi
 
 echo "ANDROID_HOME=$ANDROID_HOME"
 echo "ANDROID_USER_HOME=${ANDROID_USER_HOME:-$HOME/.android}"
 echo "ANDROID_AVD_HOME=${ANDROID_AVD_HOME:-$HOME/.android/avd}"
 echo "GRADLE_USER_HOME=${GRADLE_USER_HOME:-$HOME/.gradle}"
-echo "JAVA_HOME=${JAVA_HOME:-<system java>}"
+if command -v java >/dev/null 2>&1; then
+  echo "JAVA_HOME=${JAVA_HOME:-<JDK del sistema>} ($(java -version 2>&1 | head -1))"
+else
+  echo "JAVA_HOME=${JAVA_HOME:-<sin definir>} (java no está en PATH)"
+fi
 command -v adb >/dev/null && echo "adb=$(command -v adb)"
 command -v emulator >/dev/null && echo "emulator=$(command -v emulator)"

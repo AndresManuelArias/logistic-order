@@ -40,7 +40,7 @@ GPS en segundo plano** (limitación de Expo Go); usa un development build.
 del proyecto.
 
 ```bash
-# Desde la raíz del repo: exporta ANDROID_HOME, PATH, GRADLE_USER_HOME y JDK 17.
+# Desde la raíz del repo: exporta ANDROID_HOME, PATH, GRADLE_USER_HOME y el JDK activo.
 # Si el SDK vive fuera de $HOME (disco pequeño), indica la base:
 export ANDROID_TOOLCHAINS=/ruta/con/espacio/toolchains
 source scripts/android-env.sh
@@ -57,8 +57,10 @@ cd mobile && npm run android
 ```
 
 - `compileSdk`/`targetSdk` = **36** y `minSdk` = **24** (los fija Expo SDK 54).
-- Gradle 8.14 + React Native 0.81: usa **JDK 17** (el script lo detecta con
-  sdkman o `/usr/lib/jvm/java-17-*`).
+- Gradle 8.14 + React Native 0.81: usa **JDK 17 o 21** (verificado con Temurin
+  21). El script respeta `JAVA_HOME` si ya está definido; si no, deriva el JDK
+  del `java` del `PATH` y, como último recurso, busca un 17/21 instalado. Al
+  final imprime el `JAVA_HOME` y la versión reales, que deben coincidir.
 - El SDK ocupa ~7-9 GB entre platform, build-tools, emulador e imagen del
   sistema; reserva ese espacio antes de instalarlo.
 - El emulador Android mapea `10.0.2.2` al loopback del host: es lo que permite
@@ -148,7 +150,7 @@ source scripts/android-env.sh
 
 Exporta `ANDROID_HOME`, añade `platform-tools`/`emulator` al `PATH`, fija
 `ANDROID_USER_HOME`, `ANDROID_AVD_HOME` (para que el emulador encuentre el AVD),
-`GRADLE_USER_HOME` y JDK 17. Al final imprime las rutas: verifica que
+`GRADLE_USER_HOME` y el JDK activo. Al final imprime las rutas: verifica que
 `ANDROID_AVD_HOME` apunta a donde está `tiendas36.ini`.
 
 #### Paso 2 — Backend y base de datos
