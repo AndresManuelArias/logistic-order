@@ -1,29 +1,56 @@
-# Fastlane — app móvil
+fastlane documentation
+----
 
-Lanes disponibles:
+# Installation
 
-| Lane | Entorno | Qué hace |
-|---|---|---|
-| `test` | Linux/macOS | `npm run typecheck` + `npm run test`. |
-| `build` | Linux/macOS | `test` + `npx expo export --platform android` (bundle JS). |
-| `ci` | Linux/macOS | Igual que `build`; es la lane que ejecuta GitHub Actions. |
-| `ios` | **solo macOS + Xcode** | `expo prebuild` + `build_app` con firma. |
+Make sure you have the latest version of the Xcode command line tools installed:
 
-## Uso
-
-```bash
-cd mobile
-bundle install
-bundle exec fastlane ci
+```sh
+xcode-select --install
 ```
 
-## Limitaciones
+For _fastlane_ installation instructions, see [Installing _fastlane_](https://docs.fastlane.tools/#installing-fastlane)
 
-- El entorno de CI (Ubuntu) no tiene Xcode ni Android SDK: no se genera un
-  binario nativo. `build`/`ci` validan TypeScript, pruebas y que Metro puede
-  producir el bundle JS de producción, que es lo verificable sin SDK.
-- La lane `ios` falla de forma explícita en Linux y no incluye credenciales de
-  firma. Para publicar en App Store/Play Store hacen falta macOS, certificados,
-  perfiles de aprovisionamiento y secretos del repositorio (no versionados).
-- `Gemfile.lock` se genera con `bundle install`; commitearlo cuando se fije la
-  versión de Fastlane para builds reproducibles.
+# Available Actions
+
+## Android
+
+### android test
+
+```sh
+[bundle exec] fastlane android test
+```
+
+Typecheck y pruebas unitarias de la app móvil
+
+### android build
+
+```sh
+[bundle exec] fastlane android build
+```
+
+Bundle JS de producción con Expo (no requiere Android SDK)
+
+### android ci
+
+```sh
+[bundle exec] fastlane android ci
+```
+
+Lane de CI: validación + bundle JS
+
+### android ios
+
+```sh
+[bundle exec] fastlane android ios
+```
+
+Build nativo iOS (solo macOS con Xcode)
+
+----
+
+This README.md is auto-generated and will be re-generated every time [_fastlane_](https://fastlane.tools) is run.
+
+More information about _fastlane_ can be found on [fastlane.tools](https://fastlane.tools).
+
+The documentation of _fastlane_ can be found on [docs.fastlane.tools](https://docs.fastlane.tools).

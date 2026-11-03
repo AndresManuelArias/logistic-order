@@ -1,16 +1,26 @@
 default_platform(:android)
 
+# fastlane ejecuta las lanes desde mobile/fastlane/. Los comandos de Node
+# (npm, npx) deben correr desde mobile/, donde está package.json. `npm` sube
+# por los directorios hasta encontrarlo, pero `expo` no: buscaba
+# fastlane/package.json y fallaba con ConfigError.
+APP_ROOT = File.expand_path("..", __dir__)
+
+def sh_in_app(*args)
+  Dir.chdir(APP_ROOT) { sh(*args) }
+end
+
 platform :android do
   desc "Typecheck y pruebas unitarias de la app móvil"
   lane :test do
-    sh("npm", "run", "typecheck")
-    sh("npm", "run", "test")
+    sh_in_app("npm", "run", "typecheck")
+    sh_in_app("npm", "run", "test")
   end
 
   desc "Bundle JS de producción con Expo (no requiere Android SDK)"
   lane :build do
     test
-    sh("npx", "expo", "export", "--platform", "android", "--output-dir", "dist")
+    sh_in_app("npx", "expo", "export", "--platform", "android", "--output-dir", "dist")
   end
 
   desc "Lane de CI: validación + bundle JS"
