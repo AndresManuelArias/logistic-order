@@ -671,6 +671,11 @@ Las migraciones se aplican automáticamente al arrancar el backend (`MIGRATE_ON_
 - **`No space left on device`**: Docker necesita espacio en `/var/lib/docker`. Revisa `docker system df` y libera imágenes/caché no usadas.
 - **Puerto ocupado**: cambia `BACKEND_PORT`, `WEB_PORT` o `DB_PORT` en `.env`.
 - **BD en bucle de reinicio**: revisa `docker compose logs db`; si el volumen quedó corrupto tras un fallo de disco, `make clean` lo recrea (borra datos locales).
+- **Backend en bucle con `lookup db on 127.0.0.53`**: el contenedor se creó con el
+  `resolv.conf` del host en lugar del DNS embebido de Docker y no resuelve `db`.
+  `docker compose up -d --force-recreate backend` lo regenera (`nameserver 127.0.0.11`);
+  `docker compose restart` **no** sirve porque no recrea el contenedor. Comprueba con
+  `docker compose exec backend cat /etc/resolv.conf` y `curl -s localhost:8080/healthz`.
 
 ## Auditoría del uso de la IA
 
